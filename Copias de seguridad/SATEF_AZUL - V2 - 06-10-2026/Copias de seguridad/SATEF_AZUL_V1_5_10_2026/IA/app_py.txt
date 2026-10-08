@@ -1,0 +1,473 @@
+import mysql.connector
+from mysql.connector import Error
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify
+from werkzeug.security import generate_password_hash, check_password_hash
+
+app = Flask(__name__)
+app.secret_key = 'satef_azul_secret_key'
+
+DB_CONFIG = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': 'c^2=a^2+b^2',
+    'database': 'satef_azul'
+}
+
+def get_db_connection():
+    try:
+        return mysql.connector.connect(**DB_CONFIG)
+    except Error as e:
+        print(f"Error al conectar a MySQL: {e}")
+        return None
+
+def init_db():
+    conn = get_db_connection()
+    if conn and conn.is_connected():
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM Usuario WHERE username = %s", ('admin',))
+        user = cursor.fetchone()
+        
+        if not user:
+            # Crear administrador inicial
+            cursor.execute("INSERT INTO Usuario (username, passwordHash) VALUES (%s, %s)", ('admin', 'admin123'))
+            user_id = cursor.lastrowid
+            cursor.execute("""
+                INSERT INTO Administrador (idUsuario, primerNombreAdmin, apellidoPaternoAdmin, ci, telf)
+                VALUES (%s, 'Nathan', 'Torrico', '1234567', '70000000')
+            """, (user_id,))
+            
+            # Bus inicial
+            cursor.execute("INSERT INTO Bus (placa, marca, modelo, estado) VALUES (%s, %s, %s, %s)", ('2451-AZU', 'Scania', '2022', 'Activo'))
+            
+            # Chofer inicial
+            cursor.execute("INSERT INTO Usuario (username, passwordHash) VALUES (%s, %s)", ('chofer1', '123456'))
+            c_user_id = cursor.lastrowid
+            cursor.execute("""
+                INSERT INTO Conductor (idUsuario, primerNombreConductor, apellidoPaterno, ci, telf, categoriaLicenciaConducir)
+                VALUES (%s, 'Juan Carlos', 'Pérez', '5487921', '71234567', 'C')
+            """, (c_user_id,))
+            
+            conn.commit()
+            
+        cursor.close()
+        conn.close()
+
+@app.route('/')
+def index():
+    if 'usuario' in session:
+        return redirect(url_for('dashboard'))
+    return render_template('login.html')
+
+@app.route('/login', methods=['POST'])
+def login():
+    username = request.form['username']
+    password = request.form['password']
+    
+    conn = get_db_connection()
+    if not conn:
+        return render_template('login.html', error="Error de conexión con la base de datos")
+        
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT idUsuario, passwordHash FROM Usuario WHERE username = %s", (username,))
+    user = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    
+    # Reemplazar: if user and user['passwordHash'] == password:
+    if user and (user['passwordHash'] == password or check_password_hash(user['passwordHash'], password)):
+        session['usuario'] = username
+        session['id_usuario'] = user['idUsuario']
+        return redirect(url_for('dashboard'))
+    else:
+        return render_template('login.html', error="Usuario o contraseña incorrectos")
+
+@app.route('/dashboard')
+def dashboard():
+    if 'usuario' not in session:
+        return redirect(url_for('index'))
+        
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    
+    # 1. Obtener Datos del Perfil Usuario Actual y Determinar ROL
+    cursor.execute("""
+        SELECT u.idUsuario, u.username, 
+               a.idAdministrador, a.primerNombreAdmin, a.segundoNombreAdmin, a.apellidoPaternoAdmin, a.apellidoMaternoAdmin, a.ci as ciAdmin, a.telf as telfAdmin,
+               c.idConductor, c.primerNombreConductor, c.segundoNombreConductor, c.apellidoPaterno, c.apellidoMaterno, c.ci as ciConductor, c.telf as telfConductor
+        FROM Usuario u
+        LEFT JOIN Administrador a ON u.idUsuario = a.idUsuario
+        LEFT JOIN Conductor c ON u.idUsuario = c.idUsuario
+        WHERE u.idUsuario = %s
+    """, (session['id_usuario'],))
+    perfil = cursor.fetchone()
+
+    # Determinación del rol del usuario
+    rol = 'admin' if perfil and perfil.get('idAdministrador') else 'conductor'
+
+    # Normalizar campos para vista de perfil
+    if perfil:
+        perfil['primerNombre'] = perfil['primerNombreAdmin'] if rol == 'admin' else perfil['primerNombreConductor']
+        perfil['segundoNombre'] = perfil['segundoNombreAdmin'] if rol == 'admin' else perfil['segundoNombreConductor']
+        perfil['apellidoPaterno'] = perfil['apellidoPaternoAdmin'] if rol == 'admin' else perfil['apellidoPaterno']
+        perfil['apellidoMaterno'] = perfil['apellidoMaternoAdmin'] if rol == 'admin' else perfil['apellidoMaterno']
+        perfil['ci'] = perfil['ciAdmin'] if rol == 'admin' else perfil['ciConductor']
+        perfil['telf'] = perfil['telfAdmin'] if rol == 'admin' else perfil['telfConductor']
+
+    # 2. Obtener Lista de Conductores
+    cursor.execute("""
+        SELECT c.idConductor, c.idUsuario, c.primerNombreConductor, c.segundoNombreConductor, 
+               c.apellidoPaterno, c.apellidoMaterno, c.ci, c.telf, c.categoriaLicenciaConducir, u.username
+        FROM Conductor c
+        JOIN Usuario u ON c.idUsuario = u.idUsuario
+    """)
+    conductores = cursor.fetchall()
+    
+    # 3. Obtener Lista de Buses
+    cursor.execute("SELECT * FROM Bus")
+    buses = cursor.fetchall()
+
+    # 4. Obtener Lista de Antecedentes
+    cursor.execute("""
+        SELECT a.idAntecedente, CONCAT(c.primerNombreConductor, ' ', c.apellidoPaterno) as conductor,
+               a.razonAntecedente, a.fechaAntecedente
+        FROM Antecedente a
+        JOIN Conductor c ON a.idConductor = c.idConductor
+        ORDER BY a.fechaAntecedente DESC
+    """)
+    antecedentes = cursor.fetchall()
+
+    # 5. Obtener Viajes Registrados (Filtrado por Rol)
+    if rol == 'admin':
+        cursor.execute("""
+            SELECT v.idViaje, CONCAT(c.primerNombreConductor, ' ', c.apellidoPaterno) as conductor,
+                   b.placa, v.origen, v.destino, v.fechaSalida
+            FROM Viaje v
+            JOIN Conductor c ON v.idConductor = c.idConductor
+            JOIN Bus b ON v.idBus = b.idBus
+            ORDER BY v.idViaje DESC
+        """)
+    else:
+        cursor.execute("""
+            SELECT v.idViaje, CONCAT(c.primerNombreConductor, ' ', c.apellidoPaterno) as conductor,
+                   b.placa, v.origen, v.destino, v.fechaSalida
+            FROM Viaje v
+            JOIN Conductor c ON v.idConductor = c.idConductor
+            JOIN Bus b ON v.idBus = b.idBus
+            WHERE c.idUsuario = %s
+            ORDER BY v.idViaje DESC
+        """, (session['id_usuario'],))
+    viajes = cursor.fetchall()
+    
+    # 6. Obtener Historial de Fatiga (Filtrado por Rol)
+    if rol == 'admin':
+        cursor.execute("""
+            SELECT r.idRegistroDormida, CONCAT(c.primerNombreConductor, ' ', c.apellidoPaterno) as conductor,
+                   b.placa, r.fechaDormida, r.telemetriaEstado
+            FROM RegistroFatiga r
+            LEFT JOIN Conductor c ON r.idConductor = c.idConductor
+            LEFT JOIN Bus b ON r.idBus = b.idBus
+            ORDER BY r.fechaDormida DESC
+        """)
+    else:
+        cursor.execute("""
+            SELECT r.idRegistroDormida, CONCAT(c.primerNombreConductor, ' ', c.apellidoPaterno) as conductor,
+                   b.placa, r.fechaDormida, r.telemetriaEstado
+            FROM RegistroFatiga r
+            LEFT JOIN Conductor c ON r.idConductor = c.idConductor
+            LEFT JOIN Bus b ON r.idBus = b.idBus
+            WHERE c.idUsuario = %s
+            ORDER BY r.fechaDormida DESC
+        """, (session['id_usuario'],))
+    historial_fatiga = cursor.fetchall()
+    
+    cursor.close()
+    conn.close()
+    
+    return render_template('dashboard.html', 
+                           usuario=session['usuario'], 
+                           rol=rol,
+                           perfil=perfil,
+                           conductores=conductores, 
+                           buses=buses,
+                           antecedentes=antecedentes,
+                           viajes=viajes,
+                           historial=historial_fatiga)
+
+# --- MÓDULO ADMINISTRACIÓN: CRUD CONDUCTORES ---
+
+@app.route('/conductor/crear', methods=['POST'])
+def crear_conductor():
+    if 'usuario' not in session: return redirect(url_for('index'))
+    conn = get_db_connection()
+    if conn:
+        cursor = conn.cursor(dictionary=True)
+        try:
+            cursor.execute("INSERT INTO Usuario (username, passwordHash) VALUES (%s, %s)", 
+                           (request.form['username'], request.form['password']))
+            user_id = cursor.lastrowid
+            cursor.execute("""
+                INSERT INTO Conductor (idUsuario, primerNombreConductor, segundoNombreConductor, apellidoPaterno, apellidoMaterno, ci, telf, categoriaLicenciaConducir)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                user_id, 
+                request.form['primerNombreConductor'], 
+                request.form.get('segundoNombreConductor', ''),
+                request.form['apellidoPaterno'], 
+                request.form.get('apellidoMaterno', ''),
+                request.form['ci'], 
+                request.form['telf'], 
+                request.form['licencia']
+            ))
+            conn.commit()
+        except Error as e:
+            print(f"Error al crear conductor: {e}")
+        finally:
+            cursor.close()
+            conn.close()
+    return redirect(url_for('dashboard'))
+
+@app.route('/conductor/editar/<int:id_conductor>', methods=['POST'])
+def editar_conductor(id_conductor):
+    if 'usuario' not in session: return redirect(url_for('index'))
+    conn = get_db_connection()
+    if conn:
+        cursor = conn.cursor()
+        # .get() evita que el servidor caiga si un campo no viene en la petición
+        primer_nombre = request.form.get('primerNombreConductor', '')
+        segundo_nombre = request.form.get('segundoNombreConductor', '')
+        apellido_paterno = request.form.get('apellidoPaterno', '')
+        apellido_materno = request.form.get('apellidoMaterno', '')
+        ci = request.form.get('ci', '')
+        telf = request.form.get('telf', '')
+        licencia = request.form.get('licencia', '')
+        try:
+            cursor.execute("""
+            UPDATE Conductor 
+            SET primerNombreConductor = %s,
+                segundoNombreConductor = %s,
+                apellidoPaterno = %s,
+                apellidoMaterno = %s,
+                ci = %s,
+                telf = %s,
+                categoriaLicenciaConducir = %s
+            WHERE idConductor = %s
+            """, (primer_nombre, segundo_nombre, apellido_paterno, apellido_materno, ci, telf, licencia, id_conductor))
+            conn.commit()
+        except Error as e:
+            print(f"Error al editar conductor: {e}")
+        finally:
+            cursor.close()
+            conn.close()
+    return redirect(url_for('dashboard'))
+
+@app.route('/conductor/eliminar/<int:id_conductor>', methods=['POST'])
+def eliminar_conductor(id_conductor):
+    if 'usuario' not in session: return redirect(url_for('index'))
+    conn = get_db_connection()
+    if conn:
+        cursor = conn.cursor(dictionary=True)
+        try:
+            cursor.execute("SELECT idUsuario FROM Conductor WHERE idConductor = %s", (id_conductor,))
+            res = cursor.fetchone()
+            if res:
+                user_id = res['idUsuario']
+                cursor.execute("DELETE FROM Conductor WHERE idConductor = %s", (id_conductor,))
+                if user_id:
+                    cursor.execute("DELETE FROM Usuario WHERE idUsuario = %s", (user_id,))
+                conn.commit()
+        except Error as e:
+            print(f"Error al eliminar conductor: {e}")
+        finally:
+            cursor.close()
+            conn.close()
+    return redirect(url_for('dashboard'))
+
+# --- MÓDULO ADMINISTRACIÓN: CRUD BUSES ---
+
+@app.route('/bus/crear', methods=['POST'])
+def crear_bus():
+    if 'usuario' not in session: return redirect(url_for('index'))
+    conn = get_db_connection()
+    if conn:
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO Bus (placa, marca, modelo, estado) VALUES (%s, %s, %s, 'Activo')",
+                       (request.form['placa'], request.form['marca'], request.form['modelo']))
+        conn.commit()
+        cursor.close()
+        conn.close()
+    return redirect(url_for('dashboard'))
+
+@app.route('/bus/editar/<int:id_bus>', methods=['POST'])
+def editar_bus(id_bus):
+    if 'usuario' not in session: return redirect(url_for('index'))
+    conn = get_db_connection()
+    if conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE Bus SET placa=%s, marca=%s, modelo=%s, estado=%s WHERE idBus=%s
+        """, (request.form['placa'], request.form['marca'], request.form['modelo'], request.form['estado'], id_bus))
+        conn.commit()
+        cursor.close()
+        conn.close()
+    return redirect(url_for('dashboard'))
+
+@app.route('/bus/eliminar/<int:id_bus>', methods=['POST'])
+def eliminar_bus(id_bus):
+    if 'usuario' not in session: return redirect(url_for('index'))
+    conn = get_db_connection()
+    if conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM Bus WHERE idBus=%s", (id_bus,))
+        conn.commit()
+        cursor.close()
+        conn.close()
+    return redirect(url_for('dashboard'))
+
+# --- MÓDULO ADMINISTRACIÓN: ANTECEDENTES ---
+@app.route('/antecedente/crear', methods=['POST'])
+def crear_antecedente():
+    if 'usuario' not in session: return redirect(url_for('index'))
+    conn = get_db_connection()
+    if conn:
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO Antecedente (idConductor, razonAntecedente, fechaAntecedente) VALUES (%s, %s, NOW())",
+                       (request.form['idConductor'], request.form['razon']))
+        conn.commit()
+        cursor.close()
+        conn.close()
+    return redirect(url_for('dashboard'))
+
+# --- MÓDULO SEGUIMIENTO: VIAJES Y PERFIL ---
+
+@app.route('/viaje/crear', methods=['POST'])
+def crear_viaje():
+    if 'usuario' not in session: 
+        return redirect(url_for('index'))
+        
+    conn = get_db_connection()
+    if conn:
+        cursor = conn.cursor(dictionary=True)
+        
+        # 1. Obtener idConductor dinámicamente
+        id_conductor = request.form.get('idConductor')
+        
+        # Si el usuario es un Conductor, obtenemos su idConductor directamente desde la base de datos
+        if not id_conductor:
+            cursor.execute("SELECT idConductor FROM Conductor WHERE idUsuario = %s", (session['id_usuario'],))
+            res = cursor.fetchone()
+            if res:
+                id_conductor = res['idConductor']
+
+        id_bus = request.form.get('idBus')
+        origen = request.form.get('origen')
+        destino = request.form.get('destino')
+
+        # 2. Insertar si se cuenta con idConductor e idBus válidos
+        if id_conductor and id_bus:
+            cursor.execute("""
+                INSERT INTO Viaje (idConductor, idBus, origen, destino, fechaSalida)
+                VALUES (%s, %s, %s, %s, NOW())
+            """, (id_conductor, id_bus, origen, destino))
+            conn.commit()
+            
+        cursor.close()
+        conn.close()
+        
+    return redirect(url_for('dashboard'))
+
+@app.route('/perfil/editar', methods=['POST'])
+def editar_perfil():
+    if 'usuario' not in session: return redirect(url_for('index'))
+    conn = get_db_connection()
+    if conn:
+        cursor = conn.cursor(dictionary=True)
+        try:
+            # Comprobar si el usuario en sesión es Admin o Conductor
+            cursor.execute("SELECT idAdministrador FROM Administrador WHERE idUsuario = %s", (session['id_usuario'],))
+            is_admin = cursor.fetchone()
+            
+            if is_admin:
+                cursor.execute("""
+                    UPDATE Administrador 
+                    SET primerNombreAdmin=%s, segundoNombreAdmin=%s, apellidoPaternoAdmin=%s, apellidoMaternoAdmin=%s, ci=%s, telf=%s
+                    WHERE idUsuario=%s
+                """, (
+                    request.form['primerNombre'],
+                    request.form.get('segundoNombre', ''),
+                    request.form['apellidoPaterno'],
+                    request.form.get('apellidoMaterno', ''),
+                    request.form['ci'],
+                    request.form['telf'],
+                    session['id_usuario']
+                ))
+            else:
+                cursor.execute("""
+                    UPDATE Conductor 
+                    SET primerNombreConductor=%s, segundoNombreConductor=%s, apellidoPaterno=%s, apellidoMaterno=%s, ci=%s, telf=%s
+                    WHERE idUsuario=%s
+                """, (
+                    request.form['primerNombre'],
+                    request.form.get('segundoNombre', ''),
+                    request.form['apellidoPaterno'],
+                    request.form.get('apellidoMaterno', ''),
+                    request.form['ci'],
+                    request.form['telf'],
+                    session['id_usuario']
+                ))
+            conn.commit()
+        except Error as e:
+            print(f"Error al editar perfil: {e}")
+        finally:
+            cursor.close()
+            conn.close()
+    return redirect(url_for('dashboard'))
+
+# --- API REST Y RECEPTOR DE TELEMETRÍA (MÓDULO HARDWARE) ---
+
+@app.route('/api/alerta_hardware', methods=['POST'])
+@app.route('/api/simular_fatiga', methods=['POST'])
+def recibir_alerta_hardware():
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"status": "error", "message": "Sin conexión a BD"}), 500
+        
+    cursor = conn.cursor(dictionary=True)
+    
+    data = request.get_json(silent=True) or {}
+    id_conductor = data.get('idConductor')
+    id_bus = data.get('idBus')
+
+    # Si no se envía un ID específico, tomar el primer registro activo como prueba
+    if not id_conductor:
+        cursor.execute("SELECT idConductor FROM Conductor LIMIT 1")
+        res_c = cursor.fetchone()
+        id_conductor = res_c['idConductor'] if res_c else None
+
+    if not id_bus:
+        cursor.execute("SELECT idBus FROM Bus LIMIT 1")
+        res_b = cursor.fetchone()
+        id_bus = res_b['idBus'] if res_b else None
+
+    if not id_conductor or not id_bus:
+        cursor.close()
+        conn.close()
+        return jsonify({"status": "error", "message": "Se requiere al menos un Conductor y Bus en MySQL"}), 400
+        
+    cursor.execute("""
+        INSERT INTO RegistroFatiga (idConductor, idBus, telemetriaEstado)
+        VALUES (%s, %s, TRUE)
+    """, (id_conductor, id_bus))
+    
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return jsonify({"status": "ok", "message": "Alerta recibida y almacenada en MySQL"})
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('index'))
+
+if __name__ == '__main__':
+    init_db()
+    app.run(debug=True, port=5000)

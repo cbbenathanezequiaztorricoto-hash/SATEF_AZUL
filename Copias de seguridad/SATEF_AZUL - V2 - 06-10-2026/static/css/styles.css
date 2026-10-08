@@ -1,0 +1,176 @@
+/* ==========================================
+   CONFIGURACIÓN GENERAL & RESET
+   ========================================== */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+:root {
+    --sidebar-width: 250px;
+    --primary-color: #0d3b66;
+    --secondary-color: #f4f6f9;
+    --hover-color: #114b7f;
+}
+
+body {
+    background-color: var(--secondary-color);
+    color: #333;
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* ==========================================
+   LOGIN / AUTENTICACIÓN
+   ========================================== */
+.login-body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    background: linear-gradient(135deg, #0d3b66 0%, #001f3f 100%);
+}
+
+.login-card {
+    background: #ffffff;
+    padding: 2.5rem;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+    width: 100%;
+    max-width: 400px;
+    overflow: hidden;
+}
+.login-logo {
+    max-width: 160px;
+    max-height: 90px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    display: block;
+    margin: 0 auto;
+}
+.brand { 
+    text-align: center; 
+    margin-bottom: 1.5rem; 
+}
+
+.brand h2 { 
+    color: #0d3b66; 
+    font-size: 1.8rem; 
+}
+
+.brand p { 
+    font-size: 0.85rem; 
+    color: #666; 
+}
+
+/* ==========================================
+   DASHBOARD LAYOUT & SIDEBAR
+   ========================================== */
+.sidebar {
+    width: var(--sidebar-width);
+    height: 100vh;
+    position: fixed;
+    top: 0;
+    left: 0;
+    background-color: var(--primary-color);
+    color: white;
+    padding-top: 20px;
+    z-index: 1000;
+}
+
+.sidebar .brand {
+    padding: 10px 20px;
+    font-size: 1.4rem;
+    font-weight: bold;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    margin-bottom: 20px;
+    text-align: left;
+}
+
+.sidebar .nav-link {
+    color: rgba(255,255,255,0.8);
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: all 0.2s;
+}
+
+.sidebar .nav-link:hover, 
+.sidebar .nav-link.active {
+    color: #fff;
+    background-color: rgba(255,255,255,0.15);
+    border-left: 4px solid #00b4d8;
+}
+
+/* ==========================================
+   CONTENIDO PRINCIPAL & HEADER SUPERIOR
+   ========================================== */
+.main-content {
+    margin-left: var(--sidebar-width);
+    padding: 25px;
+}
+
+.top-header {
+    background-color: white;
+    padding: 15px 25px;
+    border-radius: 10px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 25px;
+}
+
+.user-badge {
+    background-color: #e9ecef;
+    padding: 8px 15px;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: background 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+}
+
+.user-badge:hover {
+    background-color: #dee2e6;
+    color: var(--primary-color);
+}
+
+/* ==========================================
+   TARJETAS & COMPONENTES
+   ========================================== */
+.card-custom {
+    background: white;
+    border: none;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    margin-bottom: 20px;
+}
+
+.status-badge {
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    font-weight: bold;
+}
+
+.status-badge.normal {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.badge-alert {
+    background-color: #f8d7da;
+    color: #721c24;
+    padding: 0.3rem 0.6rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    font-weight: bold;
+}

@@ -1,0 +1,150 @@
+<!-- GESTIÓN DE CÁMARAS -->
+<div class="card card-custom p-3 mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="fw-bold m-0"><i class="fas fa-video"></i> Gestión de Cámaras</h5>
+        <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalCrearCamara">
+            <i class="fas fa-plus"></i> Agregar Cámara
+        </button>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>ID</th>
+                    <th>Bus Asignado</th>
+                    <th>Modelo</th>
+                    <th>Estado</th>
+                    <th>Último Mantenimiento</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in camaras %}
+                <tr>
+                    <td>{{ c.idCamara }}</td>
+                    <td><strong>{{ c.placa if c.placa else 'Sin Asignar' }}</strong> {% if c.marca %}({{ c.marca }}){% endif %}</td>
+                    <td>{{ c.modeloCamara }}</td>
+                    <td>
+                        <span class="badge {% if c.estadoCamara == 'Activa' %}bg-success{% elif c.estadoCamara == 'Mantenimiento' %}bg-warning text-dark{% else %}bg-secondary{% endif %}">
+                            {{ c.estadoCamara }}
+                        </span>
+                    </td>
+                    <td>{{ c.ultimoMantenimiento }}</td>
+                    <td>
+                        <!-- BOTÓN EDITAR CÁMARA -->
+                        <button class="btn btn-warning btn-sm me-1" data-bs-toggle="modal" data-bs-target="#modalEditarCamara{{ c.idCamara }}" title="Editar">
+                            <i class="fas fa-edit"></i>
+                        </button>
+
+                        <!-- BOTÓN ELIMINAR CÁMARA -->
+                        <form action="{{ url_for('eliminar_camara', id_camara=c.idCamara) }}" method="POST" style="display:inline;" onsubmit="confirmarEliminacion(event)">
+                            <button type="submit" class="btn btn-danger btn-sm" title="Eliminar"><i class="fas fa-trash"></i></button>
+                        </form>
+
+                        <!-- MODAL EDITAR CÁMARA -->
+                        <div class="modal fade" id="modalEditarCamara{{ c.idCamara }}" tabindex="-1">
+                            <div class="modal-dialog">
+                                <div class="modal-content">
+                                    <form action="{{ url_for('editar_camara', id_camara=c.idCamara) }}" method="POST">
+                                        <div class="modal-header bg-warning text-dark">
+                                            <h5 class="modal-title fw-bold"><i class="fas fa-video"></i> Editar Cámara</h5>
+                                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                        </div>
+                                        <div class="modal-body text-start">
+                                            <div class="mb-3">
+                                                <label class="form-label fw-bold">Bus Asignado</label>
+                                                <select name="idBus" class="form-select" required>
+                                                    <option value="">Seleccionar Bus...</option>
+                                                    {% for b in buses %}
+                                                        <option value="{{ b.idBus }}" {% if b.idBus == c.idBus %}selected{% endif %}>
+                                                            {{ b.placa }} - {{ b.marca }}
+                                                        </option>
+                                                    {% endfor %}
+                                                </select>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label class="form-label fw-bold">Modelo Cámara</label>
+                                                <input type="text" name="modeloCamara" class="form-control" value="{{ c.modeloCamara }}" required>
+                                            </div>
+                                            <div class="row g-2 mb-3">
+                                                <div class="col-6">
+                                                    <label class="form-label fw-bold">Estado</label>
+                                                    <select name="estadoCamara" class="form-select" required>
+                                                        <option value="Activa" {% if c.estadoCamara == 'Activa' %}selected{% endif %}>Activa</option>
+                                                        <option value="Mantenimiento" {% if c.estadoCamara == 'Mantenimiento' %}selected{% endif %}>Mantenimiento</option>
+                                                        <option value="Inactiva" {% if c.estadoCamara == 'Inactiva' %}selected{% endif %}>Inactiva</option>
+                                                    </select>
+                                                </div>
+                                                <div class="col-6">
+                                                    <label class="form-label fw-bold">Último Mantenimiento</label>
+                                                    <input type="date" name="ultimoMantenimiento" class="form-control" value="{{ c.ultimoMantenimiento }}" required>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="modal-footer">
+                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                                            <button type="submit" class="btn btn-warning fw-bold">Guardar Cambios</button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6" class="text-center text-muted py-3">No hay cámaras registradas.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- MODAL CREAR CÁMARA -->
+<div class="modal fade" id="modalCrearCamara" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form action="{{ url_for('crear_camara') }}" method="POST">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title fw-bold"><i class="fas fa-video"></i> Agregar Nueva Cámara</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body text-start">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Bus Asignado</label>
+                        <select name="idBus" class="form-select" required>
+                            <option value="">Seleccionar Bus...</option>
+                            {% for b in buses %}
+                                <option value="{{ b.idBus }}">{{ b.placa }} - {{ b.marca }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Modelo Cámara</label>
+                        <input type="text" name="modeloCamara" class="form-control" placeholder="Ej: Logitech C920" required>
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label fw-bold">Estado</label>
+                            <select name="estadoCamara" class="form-select" required>
+                                <option value="Activa">Activa</option>
+                                <option value="Mantenimiento">Mantenimiento</option>
+                                <option value="Inactiva">Inactiva</option>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fw-bold">Último Mantenimiento</label>
+                            <input type="date" name="ultimoMantenimiento" class="form-control" required>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary fw-bold">Registrar Cámara</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>

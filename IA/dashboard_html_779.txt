@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>SATEF-AZUL | Panel de Control</title>
+    
+    <!-- Librerías Externas (CDN) -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <!-- CSS y JS de Leaflet -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- Hoja de Estilos Propia -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+
+<body>
+
+    <!-- SIDEBAR / MENÚ LATERAL -->
+    <div class="sidebar">
+        <div class="brand">
+            <i class="fas fa-bus-alt"></i> SATEF-AZUL
+            <div style="font-size: 0.75rem; font-weight: normal; color: #a8dadc;">Trans Azul Cochabamba</div>
+        </div>
+        
+        <nav class="nav flex-column">
+            <a class="nav-link active" href="#seguimiento" data-bs-toggle="tab">
+                <i class="fas fa-route"></i> Módulo Seguimiento
+            </a>
+            {% if rol == 'admin' %}
+            <a class="nav-link" href="#administracion" data-bs-toggle="tab">
+                <i class="fas fa-user-shield"></i> Módulo Administración
+            </a>
+            {% endif %}
+            <a class="nav-link text-danger mt-4" href="{{ url_for('logout') }}">
+                <i class="fas fa-sign-out-alt"></i> Cerrar Sesión
+            </a>
+        </nav>
+    </div>
+
+    <!-- CONTENIDO PRINCIPAL -->
+    <div class="main-content">
+        
+        <!-- HEADER SUPERIOR -->
+        <div class="top-header">
+            <div class="d-flex align-items-center gap-3">
+                <img src="{{ url_for('static', filename='img/logo_trans_azul.png') }}" width="40" alt="Logo" onerror="this.src='https://cdn-icons-png.flaticon.com/512/3448/3448339.png'">
+                <h4 class="m-0 fw-bold text-secondary">Panel de Control de Telemetría y Fatiga</h4>
+            </div>
+            
+            <div class="d-flex align-items-center gap-3">
+                <span class="badge bg-success p-2"><i class="fas fa-wifi"></i> Estado Sistema: NORMAL</span>
+                
+                <!-- Botón interactivo de usuario (Abre Modal de Perfil) -->
+                <div class="user-badge" onclick="abrirModalPerfil()" title="Haga clic para ver/editar su perfil">
+                    <i class="fas fa-user-circle fa-lg text-primary"></i>
+                    <span>{{ usuario }}</span>
+                    <i class="fas fa-chevron-down ms-1" style="font-size: 0.8rem;"></i>
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-content">
+            <!-- 1. MÓDULO DE SEGUIMIENTO EN RUTA -->
+            <div class="tab-pane fade show active" id="seguimiento">
+
+                <!-- ENCABEZADO Y BOTÓN INICIAR VIAJE -->
+                
+                {% if session['rol'] == 'conductor' %}
+                    {% if viaje_activo %}
+                        <div class="card bg-light border-warning mb-3 p-3">
+                            <h5 class="fw-bold text-dark"><i class="fas fa-bus-alt text-warning"></i> Viaje en Curso</h5>
+                            <p class="mb-2"><b>Bus:</b> {{ viaje_activo.placa }} | <b>Ruta:</b> {{ viaje_activo.origen }} ➔ {{ viaje_activo.destino }}</p>
+                            <p class="mb-3"><b>Estado Actual:</b> <span class="badge {% if viaje_activo.estado == 'Detenido' %}bg-warning text-dark{% else %}bg-success{% endif %}">{{ viaje_activo.estado }}</span></p>
+                            <div class="d-flex gap-2">
+                                <form action="{{ url_for('detener_viaje', id_viaje=viaje_activo.idViaje) }}" method="POST" class="flex-fill">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                    <button type="submit" class="btn btn-warning btn-lg w-100 fw-bold text-dark">
+                                        <i class="fas fa-pause-circle"></i> Detener Viaje
+                                    </button>
+                                </form>
+                                <form action="{{ url_for('finalizar_viaje', id_viaje=viaje_activo.idViaje) }}" method="POST" class="flex-fill">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                    <button type="submit" class="btn btn-danger btn-lg w-100 fw-bold">
+                                        <i class="fas fa-flag-checkered"></i> Finalizar Viaje
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    {% else %}
+                        <div class="mb-3">
+                            <button class="btn btn-success btn-lg fw-bold" data-bs-toggle="modal" data-bs-target="#modalIniciarViaje">
+                                <i class="fas fa-play-circle"></i> Iniciar Nuevo Viaje
+                            </button>
+                        </div>
+                    {% endif %}
+                {% endif %}
+                <!-- TARJETA DIFERENCIADA POR ROL (LORA) -->
+                {% if rol == 'admin' %}
+                <!-- VISTA ADMINISTRADOR: ESTACIÓN RECEPTORA CENTRAL -->
+                <div class="card card-custom p-3 border-start border-4 border-info mb-4">
+                    <h5 class="fw-bold text-dark"><i class="fas fa-broadcast-tower text-info"></i> Receptor LoRa Central (Monitoreo)</h5>
+                    <p class="text-muted mb-2">Estación base para recepción de telemetría y alertas de fatiga entrantes de la flota:</p>
+                    <div class="alert alert-secondary mb-0 d-flex align-items-center">
+                        <i class="fas fa-wifi text-success me-2"></i>
+                        <span>Escuchando frecuencia LoRa (433 / 915 MHz)...</span>
+                    </div>
+                </div>
+                {% else %}
+                <!-- VISTA CONDUCTOR: BOTÓN TRANSMISOR DE CABINA -->
+                <div class="card card-custom p-3 border-start border-4 border-danger mb-4">
+                    <h5 class="fw-bold text-dark"><i class="fas fa-wifi text-danger"></i> Transmisor RF LoRa 433 MHz (Cabina de Bus)</h5>
+                    <p class="text-muted mb-2">Estado del transceptor de radiofrecuencia en cabina:</p>
+                    <div>
+                        <button onclick="simularAlertaLoRa()" class="btn btn-danger fw-bold">
+                            <i class="fas fa-exclamation-triangle"></i> Enviar Alerta de Fatiga por Radiofrecuencia
+                        </button>
+                    </div>
+                </div>
+                {% endif %}
+                {% if rol == 'admin' %}
+                <div class="card shadow mb-4">
+                    <div class="card-header bg-dark text-white">
+                        <h5><i class="fas fa-map-marked-alt"></i> Monitoreo de Rutas y Vehículos</h5>
+                    </div>
+                    <div class="card-body p-0">
+                        <!-- Mapa dinámico Leaflet administrado por static/js/main.js -->
+                        <div id="map" style="width: 100%; height: 500px;"></div>
+                    </div>
+                </div>
+                {% endif %}
+                <!-- TABLA DE VIAJES REGISTRADOS -->
+                <div class="card card-custom p-3 mb-4">
+                    <h5 class="fw-bold mb-3"><i class="fas fa-bus"></i> Viajes Registrados</h5>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Conductor</th>
+                                    <th>Placa Bus</th>
+                                    <th>Origen</th>
+                                    <th>Destino</th>
+                                    <th>Fecha/Hora Salida</th>
+                                    <th>Estado</th>
+                                    {% if rol == 'admin' %}
+                                    <th>Acción</th>
+                                    {% endif %}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for v in viajes %}
+                                <tr>
+                                    <td>{{ v.idViaje }}</td>
+                                    <td>{{ v.conductor }}</td>
+                                    <td><span class="badge bg-secondary">{{ v.placa }}</span></td>
+                                    <td>{{ v.origen }}</td>
+                                    <td>{{ v.destino }}</td>
+                                    <td>{{ v.fechaSalida }}</td>
+                                    <td>
+                                        {% if v.estado == 'En Ruta' %}
+                                            <span class="badge bg-success">En Ruta</span>
+                                        {% elif v.estado == 'Detenido' %}
+                                            <span class="badge bg-warning text-dark">Detenido</span>
+                                        {% elif v.estado == 'Llegado' %}
+                                            <span class="badge bg-info text-dark">Llegado</span>
+                                        {% elif v.estado == 'Finalizado' %}
+                                            <span class="badge bg-secondary">Finalizado</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">Sin estado</span>
+                                        {% endif %}
+                                    </td>
+                                    {% if rol == 'admin' %}
+                                    <td>
+                                        {% if v.estado in ('En Ruta', 'Detenido') %}
+                                        <div class="d-flex gap-2">
+                                            {% if v.estado == 'En Ruta' %}
+                                            <button type="button" class="btn btn-sm btn-outline-warning text-dark" data-estado-viaje="Detenido" data-id-viaje="{{ v.idViaje }}">
+                                                <i class="fas fa-pause-circle"></i> Detener
+                                            </button>
+                                            {% endif %}
+                                            <button type="button" class="btn btn-sm btn-outline-danger" data-estado-viaje="Finalizado" data-id-viaje="{{ v.idViaje }}">
+                                                <i class="fas fa-stop-circle"></i> Finalizar
+                                            </button>
+                                        </div>
+                                        {% else %}
+                                            <span class="text-muted">Sin acciones</span>
+                                        {% endif %}
+                                    </td>
+                                    {% endif %}
+                                </tr>
+                                {% else %}
+                                <tr>
+                                    <td colspan="{% if rol == 'admin' %}8{% else %}7{% endif %}" class="text-center text-muted">No hay viajes asignados a su cuenta.</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- HISTORIAL DE FATIGA -->
+                <div class="card card-custom p-3">
+                    <h5 class="fw-bold mb-3"><i class="fas fa-history"></i> Historial de Registros de Fatiga</h5>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle" data-rol="{{ rol }}">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Conductor</th>
+                                    <th>Placa</th>
+                                    <th>Fecha / Hora</th>
+                                    {% if rol == 'admin' %}
+                                    <th>Estado Telemetría</th>
+                                    <th>Acción</th>
+                                    {% endif %}
+                                </tr>
+                            </thead>
+                            <tbody id="tablaHistorialFatigaBody">
+                                {% for h in historial %}
+                                <tr>
+                                    <td>{{ h.idRegistroDormida }}</td>
+                                    <td>{{ h.conductor or 'Conductor Desconocido' }}</td>
+                                    <td><span class="badge bg-dark">{{ h.placa or 'N/A' }}</span></td>
+                                    <td>{{ h.fechaDormida }}</td>
+                                    {% if rol == 'admin' %}
+                                    <td>
+                                        {% if h.telemetriaEstado %}
+                                            <span class="badge bg-danger"><i class="fas fa-bell"></i> Alerta de Fatiga</span>
+                                        {% else %}
+                                            <span class="badge bg-success">Normal</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <button class="btn btn-sm btn-outline-warning" data-notificar-patrulla data-conductor="{{ h.conductor or 'Conductor Desconocido' }}" data-placa="{{ h.placa or 'N/A' }}">
+                                            <i class="fas fa-shield-alt"></i> Notificar Patrulla
+                                        </button>
+                                    </td>
+                                    {% endif %}
+                                </tr>
+                                {% else %}
+                                <tr>
+                                    <td colspan="{% if rol == 'admin' %}6{% else %}4{% endif %}" class="text-center text-muted">No se han registrado eventos de fatiga.</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. MÓDULO DE ADMINISTRACIÓN (SOLO ADMIN) -->
+            {% if rol == 'admin' %}
+            <div class="tab-pane fade" id="administracion">
+                <h3 class="text-primary fw-bold mb-4"><i class="fas fa-user-shield"></i> Módulo de Administración</h3>
+                <!-- GESTIÓN DE CONDUCTORES -->
+                <div class="card card-custom p-3 mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 class="fw-bold m-0"><i class="fas fa-users"></i> Conductores Registrados</h5>
+                        <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalCrearConductor">
+                            <i class="fas fa-plus"></i> Nuevo Conductor
+                        </button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Nombre Completo</th>
+                                    <th>CI</th>
+                                    <th>Teléfono</th>
+                                    <th>Categoría Licencia</th>
+                                    <th>Usuario</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for c in conductores %}
+                                <tr>
+                                    <td>{{ c.primerNombreConductor }} {{ c.segundoNombreConductor or '' }} {{ c.apellidoPaterno }} {{ c.apellidoMaterno or '' }}</td>
+                                    <td>{{ c.ci }}</td>
+                                    <td>{{ c.telf }}</td>
+                                    <td><span class="badge bg-info text-dark">Categoría {{ c.categoriaLicenciaConducir }}</span></td>
+                                    <td><strong>{{ c.username }}</strong></td>
+                                    <td>
+                                        <!-- BOTÓN EDITAR CONDUCTOR -->
+                                        <button class="btn btn-warning btn-sm me-1" data-bs-toggle="modal" data-bs-target="#modalEditarConductor{{ c.idConductor }}" title="Editar">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <!-- BOTÓN ELIMINAR CONDUCTOR -->
+                                        <form action="{{ url_for('eliminar_conductor', id_conductor=c.idConductor) }}" method="POST" style="display:inline;" onsubmit="confirmarEliminacion(event)">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                            <button type="submit" class="btn btn-danger btn-sm" title="Eliminar"><i class="fas fa-trash"></i></button>
+                                        </form>
+
+                                        <!-- MODAL EDITAR CONDUCTOR (DENTRO DEL BUCLE) -->
+                                        <div class="modal fade" id="modalEditarConductor{{ c.idConductor }}" tabindex="-1">
+                                            <div class="modal-dialog">
+                                                <div class="modal-content">
+                                                    <form action="{{ url_for('editar_conductor', id_conductor=c.idConductor) }}" method="POST">
+                                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                        <div class="modal-header bg-warning text-dark">
+                                                            <h5 class="modal-title fw-bold"><i class="fas fa-user-edit"></i> Editar Conductor</h5>
+                                                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                                        </div>
+                                                        <div class="modal-body text-start">
+                                                            <div class="row g-2 mb-3">
+                                                                <div class="col-6">
+                                                                    <label class="form-label fw-bold">1er Nombre</label>
+                                                                    <input type="text" name="primerNombreConductor" class="form-control" value="{{ c.primerNombreConductor }}" required>
+                                                                </div>
+                                                                <div class="col-6">
+                                                                    <label class="form-label fw-bold">2do Nombre</label>
+                                                                    <input type="text" name="segundoNombreConductor" class="form-control" value="{{ c.segundoNombreConductor or '' }}">
+                                                                </div>
+                                                            </div>
+                                                            <div class="row g-2 mb-3">
+                                                                <div class="col-6">
+                                                                    <label class="form-label fw-bold">Apellido Paterno</label>
+                                                                    <input type="text" name="apellidoPaterno" class="form-control" value="{{ c.apellidoPaterno }}" required>
+                                                                </div>
+                                                                <div class="col-6">
+                                                                    <label class="form-label fw-bold">Apellido Materno</label>
+                                                                    <input type="text" name="apellidoMaterno" class="form-control" value="{{ c.apellidoMaterno or '' }}">
+                                                                </div>
+                                                            </div>
+                                                            <div class="row g-2 mb-3">
+                                                                <div class="col-6">
+                                                                    <label class="form-label fw-bold">CI</label>
+                                                                    <input type="text" name="ci" class="form-control" value="{{ c.ci }}"
+                                                                    inputmode="numeric"
+                                                                    oninput="this.value = this.value.replace(/[^0-9]/g, '')"
+                                                                    required>
+                                                                </div>
+                                                                <div class="col-6">
+                                                                    <label class="form-label fw-bold">Teléfono</label>
+                                                                    <input type="text" name="telf" class="form-control" value="{{ c.telf }}"
+                                                                    inputmode="numeric"
+                                                                    maxlength="8"
+                                                                    oninput="this.value = this.value.replace(/[^0-9]/g, '')"
+                                                                    required>
+                                                                </div>
+                                                            </div>
+                                                            <div class="mb-3">
+                                                                <label class="form-label fw-bold">Categoría Licencia</label>
+                                                                <select name="licencia" class="form-select" required>
+                                                                    <option value="A" {% if c.categoriaLicenciaConducir == 'A' %}selected{% endif %}>Categoría A</option>
+                                                                    <option value="B" {% if c.categoriaLicenciaConducir == 'B' %}selected{% endif %}>Categoría B</option>
+                                                                    <option value="C" {% if c.categoriaLicenciaConducir == 'C' %}selected{% endif %}>Categoría C</option>
+                                                                </select>
+                                                            </div>
+                                                        </div>
+                                                        <div class="modal-footer">
+                                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                                                            <button type="submit" class="btn btn-warning fw-bold">Guardar Cambios</button>
+                                                        </div>
+                                                    </form>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- GESTIÓN DE BUSES -->
+                <div class="card card-custom p-3 mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 class="fw-bold m-0"><i class="fas fa-bus-alt"></i> Flota de Buses</h5>
+                        <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalCrearBus">
+                            <i class="fas fa-plus"></i> Agregar Bus
+                        </button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Placa</th>
+                                    <th>Marca</th>
+                                    <th>Modelo</th>
+                                    <th>Estado</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for b in buses %}
+                                <tr>
+                                    <td>{{ b.idBus }}</td>
+                                    <td><strong>{{ b.placa }}</strong></td>
+                                    <td>{{ b.marca }}</td>
+                                    <td>{{ b.modelo }}</td>
+                                    <td><span class="badge bg-success">{{ b.estado }}</span></td>
+                                    <td>
+                                        <!-- BOTÓN EDITAR BUS -->
+                                        <button class="btn btn-warning btn-sm me-1" data-bs-toggle="modal" data-bs-target="#modalEditarBus{{ b.idBus }}" title="Editar">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <!-- BOTÓN ELIMINAR BUS -->
+                                        <form action="{{ url_for('eliminar_bus', id_bus=b.idBus) }}" method="POST" style="display:inline;" onsubmit="confirmarEliminacion(event)">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                            <button type="submit" class="btn btn-danger btn-sm" title="Eliminar"><i class="fas fa-trash"></i></button>
+                                        </form>
+
+                                        <!-- MODAL EDITAR BUS -->
+                                        <div class="modal fade" id="modalEditarBus{{ b.idBus }}" tabindex="-1">
+                                            <div class="modal-dialog">
+                                                <div class="modal-content">
+                                                    <form action="{{ url_for('editar_bus', id_bus=b.idBus) }}" method="POST">
+                                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                                        <div class="modal-header bg-warning text-dark">
+                                                            <h5 class="modal-title fw-bold"><i class="fas fa-bus"></i> Editar Bus</h5>
+                                                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                                        </div>
+                                                        <div class="modal-body text-start">
+                                                            <div class="mb-3">
+                                                                <label class="form-label fw-bold">Placa</label>
+                                                                <input type="text" name="placa" class="form-control text-uppercase" value="{{ b.placa }}" 
+                                                                       pattern="\d{3,4}-[A-Za-z]{3}" 
+                                                                       title="Formato válido: 123-ABC o 1234-ABC" 
+                                                                       oninput="this.value = this.value.toUpperCase()" 
+                                                                       required>
+                                                            </div>
+                                                            <div class="row g-2 mb-3">
+                                                                <div class="col-6">
+                                                                    <label class="form-label fw-bold">Marca</label>
+                                                                    <input type="text" name="marca" class="form-control" value="{{ b.marca }}" required>
+                                                                </div>
+                                                                <div class="col-6">
+                                                                    <label class="form-label fw-bold">Modelo</label>
+                                                                    <input type="text" name="modelo" class="form-control" value="{{ b.modelo }}" required>
+                                                                </div>
+                                                            </div>
+                                                            <div class="mb-3">
+                                                                <label class="form-label fw-bold">Estado</label>
+                                                                <select name="estado" class="form-select" required>
+                                                                    <option value="Activo" {% if b.estado == 'Activo' %}selected{% endif %}>Activo</option>
+                                                                    <option value="Mantenimiento" {% if b.estado == 'Mantenimiento' %}selected{% endif %}>Mantenimiento</option>
+                                                                    <option value="Inactivo" {% if b.estado == 'Inactivo' %}selected{% endif %}>Inactivo</option>
+                                                                </select>
+                                                            </div>
+                                                        </div>
+                                                        <div class="modal-footer">
+                                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                                                            <button type="submit" class="btn btn-warning fw-bold">Guardar Cambios</button>
+                                                        </div>
+                                                    </form>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <!-- Incluir aquí la gestión de cámaras -->
+                {% include 'camaras.html' %}
+                <!-- ANTECEDENTES -->
+                <div class="card card-custom p-3">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 class="fw-bold m-0"><i class="fas fa-file-alt"></i> Antecedentes de Conductores</h5>
+                        <button class="btn btn-warning btn-sm" data-bs-toggle="modal" data-bs-target="#modalCrearAntecedente">
+                            <i class="fas fa-plus"></i> Registrar Antecedente
+                        </button>
+                    </div>
+                    <ul class="list-group list-group-flush">
+                        {% for a in antecedentes %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            <div>
+                                <strong>{{ a.conductor }}</strong>: {{ a.razonAntecedente }}
+                            </div>
+                            <small class="text-muted">{{ a.fechaAntecedente }}</small>
+                        </li>
+                        {% else %}
+                        <li class="list-group-item text-muted">No hay antecedentes registrados.</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+            {% endif %}
+
+        </div>
+    </div>
+
+    <!-- MODALES GLOBALES -->
+    <!-- Modal Iniciar Viaje -->
+    <div class="modal fade" id="modalIniciarViaje" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form action="{{ url_for('crear_viaje') }}" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="modal-header bg-success text-white">
+                        <h5 class="modal-title fw-bold"><i class="fas fa-route"></i> Registrar e Iniciar Viaje</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body text-start">
+                        {% if rol == 'admin' %}
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Conductor Asignado</label>
+                            <select name="idConductor" class="form-select" required>
+                                {% for c in conductores %}
+                                <option value="{{ c.idConductor }}">{{ c.primerNombreConductor }} {{ c.apellidoPaterno }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        {% endif %}
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Bus Asignado</label>
+                            <select name="idBus" class="form-select" required>
+                                <option value="" selected disabled>Elija un bus disponible de la flota...</option>
+                                {% for b in buses_disponibles %}
+                                <option value="{{ b.idBus }}">{{ b.placa }} - {{ b.marca }} ({{ b.modelo }})</option>
+                                {% else %}
+                                <option value="" disabled>No hay buses disponibles en este momento</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Origen</label>
+                            <input type="text" name="origen" class="form-control" value="Cochabamba" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Destino</label>
+                            <input type="text" name="destino" class="form-control" placeholder="Ej. Oruro, Santa Cruz" required>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-success fw-bold"><i class="fas fa-play"></i> Iniciar Viaje</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Perfil -->
+    <div class="modal fade" id="modalPerfil" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form action="{{ url_for('editar_perfil') }}" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="modal-header bg-primary text-white">
+                        <h5 class="modal-title fw-bold"><i class="fas fa-user-edit"></i> Perfil de Usuario ({{ usuario }})</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body text-start">
+                        <div class="row g-2 mb-3">
+                            <div class="col">
+                                <label class="form-label fw-bold">Primer Nombre</label>
+                                <input type="text" name="primerNombre" class="form-control" value="{{ perfil.primerNombre if perfil else '' }}" required>
+                            </div>
+                            <div class="col">
+                                <label class="form-label fw-bold">Segundo Nombre</label>
+                                <input type="text" name="segundoNombre" class="form-control" value="{{ perfil.segundoNombre if perfil else '' }}">
+                            </div>
+                        </div>
+                        <div class="row g-2 mb-3">
+                            <div class="col">
+                                <label class="form-label fw-bold">Apellido Paterno</label>
+                                <input type="text" name="apellidoPaterno" class="form-control" value="{{ perfil.apellidoPaterno if perfil else '' }}" required>
+                            </div>
+                            <div class="col">
+                                <label class="form-label fw-bold">Apellido Materno</label>
+                                <input type="text" name="apellidoMaterno" class="form-control" value="{{ perfil.apellidoMaterno if perfil else '' }}">
+                            </div>
+                        </div>
+                        <div class="row g-2 mb-3">
+                            <div class="col">
+                                <label class="form-label fw-bold">CI</label>
+                                <input type="text" name="ci" class="form-control" value="{{ perfil.ci if perfil else '' }}" 
+                                       inputmode="numeric" 
+                                       oninput="this.value = this.value.replace(/[^0-9]/g, '')" 
+                                       required>
+                            </div>
+                            <div class="col">
+                                <label class="form-label fw-bold">Teléfono</label>
+                                <input type="text" name="telf" class="form-control" value="{{ perfil.telf if perfil else '' }}" 
+                                       inputmode="numeric" 
+                                       maxlength="8" 
+                                       oninput="this.value = this.value.replace(/[^0-9]/g, '')" 
+                                       required>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+                        <button type="submit" class="btn btn-primary fw-bold">Guardar Cambios</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    {% if rol == 'admin' %}
+    <!-- Modal Crear Conductor -->
+    <div class="modal fade" id="modalCrearConductor" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form action="{{ url_for('crear_conductor') }}" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="modal-header bg-primary text-white">
+                        <h5 class="modal-title fw-bold">Registrar Conductor</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body text-start">
+                        <div class="mb-2"><input type="text" name="primerNombreConductor" class="form-control" placeholder="Primer Nombre" required></div>
+                        <div class="mb-2"><input type="text" name="segundoNombreConductor" class="form-control" placeholder="Segundo Nombre"></div>
+                        <div class="mb-2"><input type="text" name="apellidoPaterno" class="form-control" placeholder="Apellido Paterno" required></div>
+                        <div class="mb-2"><input type="text" name="apellidoMaterno" class="form-control" placeholder="Apellido Materno"></div>
+                        <div class="mb-2">
+                            <input type="text" name="ci" class="form-control" placeholder="CI"
+                            inputmode="numeric"
+                            oninput="this.value = this.value.replace(/[^0-9]/g, '')"
+                            required>
+                        </div>
+                        <div class="mb-2">
+                            <input type="text" name="telf" class="form-control" placeholder="Teléfono"
+                            inputmode="numeric"
+                            maxlength="8"
+                            oninput="this.value = this.value.replace(/[^0-9]/g, '')"
+                            required>
+                        </div>
+                        <div class="mb-2">
+                            <select name="licencia" class="form-select" required>
+                                <option value="C">Categoría C</option>
+                                <option value="B">Categoría B</option>
+                                <option value="A">Categoría A</option>
+                            </select>
+                        </div>
+                        <hr>
+                        <div class="mb-2">
+                            <input type="text" name="username" class="form-control" placeholder="Nombre de usuario" 
+                                   pattern="[A-Za-z0-9_]{4,20}" 
+                                   title="Solo letras, números y guion bajo (4-20 caracteres)" 
+                                   oninput="this.value = this.value.replace(/\s+/g, '')" 
+                                   required>
+                        </div>
+                        <div class="mb-2">
+                            <input type="password" name="password" class="form-control" placeholder="Contraseña" minlength="6" required>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="submit" class="btn btn-primary fw-bold">Registrar</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Crear Bus -->
+    <div class="modal fade" id="modalCrearBus" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form action="{{ url_for('crear_bus') }}" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="modal-header bg-primary text-white">
+                        <h5 class="modal-title fw-bold">Agregar Nuevo Bus</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body text-start">
+                        <div class="mb-3">
+                            <input type="text" name="placa" class="form-control text-uppercase" placeholder="Placa (Ej. 2451-AZU)" 
+                                   pattern="\d{3,4}-[A-Za-z]{3}" 
+                                   title="Formato válido: 123-ABC o 1234-ABC" 
+                                   oninput="this.value = this.value.toUpperCase()" 
+                                   required>
+                        </div>
+                        <div class="mb-3"><input type="text" name="marca" class="form-control" placeholder="Marca (Ej. Scania, Volvo)" required></div>
+                        <div class="mb-3"><input type="text" name="modelo" class="form-control" placeholder="Modelo (Ej. 2022)" required></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="submit" class="btn btn-primary fw-bold">Guardar</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Crear Antecedente -->
+    <div class="modal fade" id="modalCrearAntecedente" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form action="{{ url_for('crear_antecedente') }}" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="modal-header bg-warning text-dark">
+                        <h5 class="modal-title fw-bold">Registrar Antecedente</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body text-start">
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Conductor</label>
+                            <select name="idConductor" class="form-select" required>
+                                {% for c in conductores %}
+                                <option value="{{ c.idConductor }}">{{ c.primerNombreConductor }} {{ c.apellidoPaterno }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold">Razón / Detalle del Antecedente</label>
+                            <textarea name="razon" class="form-control" rows="3" required></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="submit" class="btn btn-warning fw-bold">Registrar Antecedente</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- MODAL ALERTA PANTALLA COMPLETA CABINA -->
+    <div id="overlayPeligro" class="position-fixed top-0 start-0 w-100 h-100 bg-danger d-none flex-column justify-content-center align-items-center text-white" style="z-index: 9999;">
+        <h1 class="display-1 fw-bold mb-2"><i class="fas fa-exclamation-triangle"></i> ¡ALERTA DE FATIGA!</h1>
+        <h3 class="mb-4">CONDUCTOR ADORMECIDO DETECTADO EN CABINA</h3>
+        <img src="https://media.giphy.com/media/3o7TKSjRrfIPjeiVyM/giphy.gif" alt="Peligro" style="max-width: 320px; border-radius: 15px;" class="shadow-lg mb-4">
+        <button class="btn btn-light btn-lg text-danger fw-bold shadow" onclick="cerrarAlertaPeligro()">DESACTIVAR ALARMA DE CABINA</button>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

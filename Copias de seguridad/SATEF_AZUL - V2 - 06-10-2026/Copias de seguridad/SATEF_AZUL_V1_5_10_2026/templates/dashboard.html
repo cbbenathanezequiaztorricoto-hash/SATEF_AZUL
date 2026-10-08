@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SATEF-AZUL | Panel de Control</title>
+    
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+
+    <!-- SIDEBAR / MENÚ LATERAL CON LOGO -->
+    <div class="sidebar">
+        <div class="brand d-flex align-items-center">
+            <img src="{{ url_for('static', filename='img/logo.png') }}" alt="Logo" class="sidebar-logo" onerror="this.src='https://cdn-icons-png.flaticon.com/512/3448/3448339.png'">
+            <div>
+                SATEF-AZUL
+                <div style="font-size: 0.7rem; font-weight: normal; color: #a8dadc;">Trans Azul Cochabamba</div>
+            </div>
+        </div>
+        
+        <nav class="nav flex-column">
+            <a class="nav-link active" href="#seguimiento" data-bs-toggle="tab">
+                <i class="fas fa-route"></i> Módulo Seguimiento
+            </a>
+            {% if rol == 'admin' %}
+            <a class="nav-link" href="#administracion" data-bs-toggle="tab">
+                <i class="fas fa-user-shield"></i> Módulo Administración
+            </a>
+            {% endif %}
+            <a class="nav-link text-danger mt-4" href="{{ url_for('logout') }}">
+                <i class="fas fa-sign-out-alt"></i> Cerrar Sesión
+            </a>
+        </nav>
+    </div>
+
+    <!-- CONTENIDO PRINCIPAL -->
+    <div class="main-content">
+        
+        <!-- HEADER SUPERIOR -->
+        <div class="top-header">
+            <div class="d-flex align-items-center gap-3">
+                <img src="{{ url_for('static', filename='img/logo.png') }}" width="45" alt="Logo" onerror="this.src='https://cdn-icons-png.flaticon.com/512/3448/3448339.png'">
+                <h4 class="m-0 fw-bold text-secondary">Panel de Control de Telemetría y Fatiga</h4>
+            </div>
+            
+            <div class="d-flex align-items-center gap-3">
+                <span class="badge bg-success p-2"><i class="fas fa-wifi"></i> Estado Sistema: NORMAL</span>
+                
+                <div class="user-badge" onclick="abrirModalPerfil()" title="Ver Perfil">
+                    <i class="fas fa-user-circle fa-lg text-primary"></i>
+                    <span>{{ usuario }} ({{ rol|upper }})</span>
+                    <i class="fas fa-chevron-down ms-1" style="font-size: 0.8rem;"></i>
+                </div>
+            </div>
+        </div>
+
+        <div class="tab-content">
+
+            <!-- 1. MÓDULO DE SEGUIMIENTO -->
+            <div class="tab-pane fade show active" id="seguimiento">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h3 class="text-primary fw-bold"><i class="fas fa-satellite-dish"></i> Módulo de Seguimiento en Ruta</h3>
+                    <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#modalIniciarViaje">
+                        <i class="fas fa-play-circle"></i> Iniciar Nuevo Viaje
+                    </button>
+                </div>
+
+                <!-- DIFERENCIACIÓN DE ROLES: EMISOR (CONDUCTOR) vs RECEPTOR/ALERTAS (ADMIN) -->
+                {% if rol != 'admin' %}
+                <div class="card card-custom p-3 border-start border-4 border-danger">
+                    <h5 class="fw-bold text-dark"><i class="fas fa-broadcast-tower text-danger"></i> Emisor LoRa Simulado (Cabina de Bus)</h5>
+                    <p class="text-muted mb-2">Simulador de transmisión de detección de somnolencia al sensor central:</p>
+                    <div>
+                        <button onclick="simularAlertaLoRa()" class="btn btn-danger">
+                            <i class="fas fa-exclamation-triangle"></i> Transmitir Señal de Alerta de Fatiga
+                        </button>
+                    </div>
+                </div>
+                {% else %}
+                <div class="card card-custom p-3 border-start border-4 border-primary">
+                    <h5 class="fw-bold text-dark"><i class="fas fa-bell text-primary"></i> Centro de Monitoreo de Alertas de Fatiga (Admin)</h5>
+                    <p class="text-muted mb-2">Simular recepción de alerta de fatiga entrante desde un vehículo en carretera:</p>
+                    <button class="btn btn-warning fw-bold text-dark" onclick="recibirNotificacionAdministrador('Juan Pérez', '2451-AZU')">
+                        <i class="fas fa-bell-exclamation"></i> Probar Recepción de Alerta Sonora
+                    </button>
+                </div>
+                {% endif %}
+
+                <!-- TABLA DE VIAJES REGISTRADOS (FILTRADOS POR CONDUCTOR SI NO ES ADMIN) -->
+                <div class="card card-custom p-3">
+                    <h5 class="fw-bold mb-3"><i class="fas fa-bus"></i> Viajes Registrados</h5>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Conductor</th>
+                                    <th>Placa Bus</th>
+                                    <th>Origen</th>
+                                    <th>Destino</th>
+                                    <th>Fecha/Hora Salida</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for v in viajes %}
+                                    {% if rol == 'admin' or v.conductor == usuario or v.username == usuario %}
+                                    <tr>
+                                        <td>{{ v.idViaje }}</td>
+                                        <td>{{ v.conductor }}</td>
+                                        <td><span class="badge bg-secondary">{{ v.placa }}</span></td>
+                                        <td>{{ v.origen }}</td>
+                                        <td>{{ v.destino }}</td>
+                                        <td>{{ v.fechaSalida }}</td>
+                                    </tr>
+                                    {% endif %}
+                                {% else %}
+                                <tr>
+                                    <td colspan="6" class="text-center text-muted">No hay viajes asignados a su cuenta.</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- HISTORIAL DE FATIGA -->
+                <div class="card card-custom p-3">
+                    <h5 class="fw-bold mb-3"><i class="fas fa-history"></i> Historial de Registros de Fatiga</h5>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Conductor</th>
+                                    <th>Placa</th>
+                                    <th>Fecha / Hora</th>
+                                    <th>Estado Telemetría</th>
+                                    <th>Acción</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for h in historial %}
+                                <tr>
+                                    <td>{{ h.idRegistroDormida }}</td>
+                                    <td>{{ h.conductor or 'Conductor Desconocido' }}</td>
+                                    <td><span class="badge bg-dark">{{ h.placa or 'N/A' }}</span></td>
+                                    <td>{{ h.fechaDormida }}</td>
+                                    <td>
+                                        {% if h.telemetriaEstado %}
+                                            <span class="badge bg-danger"><i class="fas fa-bell"></i> Alerta de Fatiga</span>
+                                        {% else %}
+                                            <span class="badge bg-success">Normal</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <button class="btn btn-sm btn-outline-warning" onclick="notificarPatrulla('{{ h.conductor }}', '{{ h.placa }}')">
+                                            <i class="fas fa-shield-alt"></i> Notificar Patrulla
+                                        </button>
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr>
+                                    <td colspan="6" class="text-center text-muted">No se han registrado eventos de fatiga.</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. MÓDULO DE ADMINISTRACIÓN (EDITAR RESTAURADO) -->
+            {% if rol == 'admin' %}
+            <div class="tab-pane fade" id="administracion">
+                <h3 class="text-primary fw-bold mb-4"><i class="fas fa-user-shield"></i> Módulo de Administración</h3>
+
+                <!-- GESTIÓN DE CONDUCTORES -->
+                <div class="card card-custom p-3 mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 class="fw-bold m-0"><i class="fas fa-users"></i> Conductores Registrados</h5>
+                        <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalCrearConductor">
+                            <i class="fas fa-plus"></i> Nuevo Conductor
+                        </button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Nombre Completo</th>
+                                    <th>CI</th>
+                                    <th>Teléfono</th>
+                                    <th>Categoría Licencia</th>
+                                    <th>Usuario</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for c in conductores %}
+                                <tr>
+                                    <td>{{ c.primerNombreConductor }} {{ c.segundoNombreConductor or '' }} {{ c.apellidoPaterno }} {{ c.apellidoMaterno or '' }}</td>
+                                    <td>{{ c.ci }}</td>
+                                    <td>{{ c.telf }}</td>
+                                    <td><span class="badge bg-info text-dark">Categoría {{ c.categoriaLicenciaConducir }}</span></td>
+                                    <td><strong>{{ c.username }}</strong></td>
+                                    <td>
+                                        <!-- BOTÓN EDITAR RESTAURADO -->
+                                        <button class="btn btn-warning btn-sm text-white" data-bs-toggle="modal" data-bs-target="#modalEditarConductor{{ c.idConductor }}" title="Editar Conductor">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <form action="{{ url_for('eliminar_conductor', id_conductor=c.idConductor) }}" method="POST" style="display:inline;" onsubmit="confirmarEliminacion(event)">
+                                            <button type="submit" class="btn btn-danger btn-sm" title="Eliminar Conductor"><i class="fas fa-trash"></i></button>
+                                        </form>
+                                    </td>
+                                </tr>
+
+                                <!-- MODAL EDITAR CONDUCTOR -->
+                                <div class="modal fade" id="modalEditarConductor{{ c.idConductor }}" tabindex="-1">
+                                    <div class="modal-dialog">
+                                        <div class="modal-content">
+                                            <form action="{{ url_for('editar_conductor', id_conductor=c.idConductor) }}" method="POST">
+                                                <div class="modal-header bg-warning text-dark">
+                                                    <h5 class="modal-title"><i class="fas fa-user-edit"></i> Editar Conductor</h5>
+                                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                                </div>
+                                                <div class="modal-body">
+                                                    <div class="mb-2"><label class="form-label">Primer Nombre</label><input type="text" name="primerNombreConductor" class="form-control" value="{{ c.primerNombreConductor }}" required></div>
+                                                    <div class="mb-2"><label class="form-label">Segundo Nombre</label><input type="text" name="segundoNombreConductor" class="form-control" value="{{ c.segundoNombreConductor or '' }}"></div>
+                                                    <div class="mb-2"><label class="form-label">Apellido Paterno</label><input type="text" name="apellidoPaterno" class="form-control" value="{{ c.apellidoPaterno }}" required></div>
+                                                    <div class="mb-2"><label class="form-label">Apellido Materno</label><input type="text" name="apellidoMaterno" class="form-control" value="{{ c.apellidoMaterno or '' }}"></div>
+                                                    <div class="mb-2"><label class="form-label">CI</label><input type="text" name="ci" class="form-control" value="{{ c.ci }}" required></div>
+                                                    <div class="mb-2"><label class="form-label">Teléfono</label><input type="text" name="telf" class="form-control" value="{{ c.telf }}" required></div>
+                                                </div>
+                                                <div class="modal-footer">
+                                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                                                    <button type="submit" class="btn btn-warning">Actualizar</button>
+                                                </div>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- GESTIÓN DE BUSES -->
+                <div class="card card-custom p-3 mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 class="fw-bold m-0"><i class="fas fa-bus-alt"></i> Flota de Buses</h5>
+                        <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#modalCrearBus">
+                            <i class="fas fa-plus"></i> Agregar Bus
+                        </button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Placa</th>
+                                    <th>Marca</th>
+                                    <th>Modelo</th>
+                                    <th>Estado</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for b in buses %}
+                                <tr>
+                                    <td>{{ b.idBus }}</td>
+                                    <td><strong>{{ b.placa }}</strong></td>
+                                    <td>{{ b.marca }}</td>
+                                    <td>{{ b.modelo }}</td>
+                                    <td><span class="badge bg-success">{{ b.estado }}</span></td>
+                                    <td>
+                                        <!-- BOTÓN EDITAR RESTAURADO -->
+                                        <button class="btn btn-warning btn-sm text-white" data-bs-toggle="modal" data-bs-target="#modalEditarBus{{ b.idBus }}" title="Editar Bus">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <form action="{{ url_for('eliminar_bus', id_bus=b.idBus) }}" method="POST" style="display:inline;" onsubmit="confirmarEliminacion(event)">
+                                            <button type="submit" class="btn btn-danger btn-sm" title="Eliminar Bus"><i class="fas fa-trash"></i></button>
+                                        </form>
+                                    </td>
+                                </tr>
+
+                                <!-- MODAL EDITAR BUS -->
+                                <div class="modal fade" id="modalEditarBus{{ b.idBus }}" tabindex="-1">
+                                    <div class="modal-dialog">
+                                        <div class="modal-content">
+                                            <form action="{{ url_for('editar_bus', id_bus=b.idBus) }}" method="POST">
+                                                <div class="modal-header bg-warning text-dark">
+                                                    <h5 class="modal-title"><i class="fas fa-bus"></i> Editar Bus</h5>
+                                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                                </div>
+                                                <div class="modal-body">
+                                                    <div class="mb-3"><label class="form-label">Placa</label><input type="text" name="placa" class="form-control" value="{{ b.placa }}" required></div>
+                                                    <div class="mb-3"><label class="form-label">Marca</label><input type="text" name="marca" class="form-control" value="{{ b.marca }}" required></div>
+                                                    <div class="mb-3"><label class="form-label">Modelo</label><input type="text" name="modelo" class="form-control" value="{{ b.modelo }}" required></div>
+                                                </div>
+                                                <div class="modal-footer">
+                                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                                                    <button type="submit" class="btn btn-warning">Actualizar Bus</button>
+                                                </div>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+            {% endif %}
+
+        </div>
+    </div>
+
+    <!-- MODALES GENERALES (Iniciar Viaje, Perfil, Crear) -->
+    <div class="modal fade" id="modalIniciarViaje" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form action="{{ url_for('crear_viaje') }}" method="POST">
+                    <div class="modal-header bg-success text-white">
+                        <h5 class="modal-title"><i class="fas fa-route"></i> Registrar e Iniciar Viaje</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">Conductor Asignado</label>
+                            <select name="idConductor" class="form-select" required>
+                                {% for c in conductores %}
+                                <option value="{{ c.idConductor }}">{{ c.primerNombreConductor }} {{ c.apellidoPaterno }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Bus Asignado</label>
+                            <select name="idBus" class="form-select" required>
+                                {% for b in buses %}
+                                <option value="{{ b.idBus }}">{{ b.placa }} - {{ b.marca }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Origen</label>
+                            <input type="text" name="origen" class="form-control" value="Cochabamba" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Destino</label>
+                            <input type="text" name="destino" class="form-control" placeholder="Ej. Oruro, Santa Cruz" required>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-success">Iniciar Viaje</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="modalPerfil" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form action="{{ url_for('editar_perfil') }}" method="POST">
+                    <div class="modal-header bg-primary text-white">
+                        <h5 class="modal-title"><i class="fas fa-user-edit"></i> Perfil de Usuario ({{ usuario }})</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="row g-2 mb-3">
+                            <div class="col"><label class="form-label">Primer Nombre</label><input type="text" name="primerNombre" class="form-control" value="{{ perfil.primerNombre if perfil else '' }}" required></div>
+                            <div class="col"><label class="form-label">Segundo Nombre</label><input type="text" name="segundoNombre" class="form-control" value="{{ perfil.segundoNombre if perfil else '' }}"></div>
+                        </div>
+                        <div class="row g-2 mb-3">
+                            <div class="col"><label class="form-label">Apellido Paterno</label><input type="text" name="apellidoPaterno" class="form-control" value="{{ perfil.apellidoPaterno if perfil else '' }}" required></div>
+                            <div class="col"><label class="form-label">Apellido Materno</label><input type="text" name="apellidoMaterno" class="form-control" value="{{ perfil.apellidoMaterno if perfil else '' }}"></div>
+                        </div>
+                        <div class="row g-2 mb-3">
+                            <div class="col"><label class="form-label">CI</label><input type="text" name="ci" class="form-control" value="{{ perfil.ci if perfil else '' }}" required></div>
+                            <div class="col"><label class="form-label">Teléfono</label><input type="text" name="telf" class="form-control" value="{{ perfil.telf if perfil else '' }}" required></div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+                        <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

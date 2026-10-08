@@ -1,0 +1,991 @@
+<app_py_dado>
+import re
+from functools import wraps
+from flask import Flask, render_template, request, redirect, url_for, flash, session
+from werkzeug.security import generate_password_hash, check_password_hash
+# Importa aquí tus modelos y base de datos (p. ej. db, Usuario, Conductor, Bus, Viaje, Antecedente, Camara)
+# from models import db, Usuario, Conductor, Bus, Viaje, Antecedente, Camara
+
+app = Flask(__name__)
+app.secret_key = 'tu_clave_secreta_aqui'
+
+# ==========================================
+# DECORADORES DE SEGURIDAD (RBAC Y SESIÓN)
+# ==========================================
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'usuario' not in session:
+            flash('Debe iniciar sesión para acceder.', 'warning')
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'usuario' not in session:
+            flash('Debe iniciar sesión para acceder.', 'warning')
+            return redirect(url_for('login'))
+        if session.get('rol') != 'Administrador':
+            flash('Acceso denegado: Se requieren permisos de administrador.', 'danger')
+            return redirect(url_for('dashboard'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+# ==========================================
+# FUNCIONES AUXILIARES DE VALIDACIÓN
+# ==========================================
+def validar_telefono(telf):
+    """Valida que el teléfono tenga exactamente 8 dígitos y empiece con 6 o 7."""
+    return bool(re.match(r'^[67]\d{7}$', telf))
+
+def validar_ci(ci):
+    """Valida que el CI contenga únicamente números (entre 5 y 10 dígitos)."""
+    return bool(re.match(r'^\d{5,10}$', ci))
+
+def validar_placa(placa):
+    """Valida el formato de placa boliviana (ejemplo: 1234-ABC o 2451-AZU)."""
+    return bool(re.match(r'^\d{3,4}-[A-Z]{3}$', placa.upper()))
+
+# ==========================================
+# RUTAS DE AUTENTICACIÓN Y PERFIL
+# ==========================================
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        usuario_input = request.form.get('usuario', '').strip()
+        password_input = request.form.get('password', '').strip()
+        
+        # Buscar usuario en la base de datos (Ajustar según tu modelo)
+        user = Usuario.query.filter_by(usuario=usuario_input).first()
+        
+        if user and check_password_hash(user.passwordHash, password_input):
+            session['usuario'] = user.usuario
+            session['rol'] = user.rol
+            session['user_id'] = user.id
+            flash('Inicio de sesión exitoso.', 'success')
+            return redirect(url_for('dashboard'))
+        
+        flash('Usuario o contraseña incorrectos.', 'danger')
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('Sesión cerrada correctamente.', 'info')
+    return redirect(url_for('login'))
+
+@app.route('/perfil/editar', methods=['POST'])
+@login_required
+def editar_perfil():
+    ci = request.form.get('ci', '').strip()
+    telf = request.form.get('telf', '').strip()
+    nombre = request.form.get('nombre', '').strip()
+    
+    if not validar_ci(ci):
+        flash('El CI solo debe contener números válidos.', 'danger')
+        return redirect(url_for('dashboard'))
+        
+    if not validar_telefono(telf):
+        flash('El teléfono debe tener 8 dígitos y comenzar con 6 o 7.', 'danger')
+        return redirect(url_for('dashboard'))
+        
+    user = Usuario.query.get(session['user_id'])
+    if user:
+        user.nombre = nombre
+        user.ci = ci
+        user.telf = telf
+        db.session.commit()
+        flash('Perfil actualizado con éxito.', 'success')
+        
+    return redirect(url_for('dashboard'))
+
+# ==========================================
+# GESTIÓN DE CONDUCTORES (SOLO ADMIN)
+# ==========================================
+@app.route('/conductor/crear', methods=['POST'])
+@admin_required
+def crear_conductor():
+    nombre = request.form.get('nombre', '').strip()
+    ci = request.form.get('ci', '').strip()
+    telf = request.form.get('telf', '').strip()
+    password = request.form.get('password', '').strip()
+    
+    if not nombre or not password:
+        flash('El nombre y la contraseña son obligatorios.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    if not validar_ci(ci):
+        flash('Formato de CI inválido.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    if not validar_telefono(telf):
+        flash('El teléfono debe tener 8 dígitos y comenzar con 6 o 7.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    # ENCRIPTACIÓN DE CONTRASEÑA BLINDADA
+    password_hashed = generate_password_hash(password, method='pbkdf2:sha256')
+    
+    nuevo_conductor = Conductor(
+        nombre=nombre,
+        ci=ci,
+        telf=telf,
+        passwordHash=password_hashed,
+        rol='Conductor'
+    )
+    db.session.add(nuevo_conductor)
+    db.session.commit()
+    
+    flash('Conductor registrado exitosamente.', 'success')
+    return redirect(url_for('dashboard'))
+
+@app.route('/conductor/editar/<int:id>', methods=['POST'])
+@admin_required
+def editar_conductor(id):
+    conductor = Conductor.query.get_or_404(id)
+    ci = request.form.get('ci', '').strip()
+    telf = request.form.get('telf', '').strip()
+    
+    if not validar_ci(ci):
+        flash('Formato de CI inválido.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    if not validar_telefono(telf):
+        flash('El teléfono debe tener 8 dígitos y comenzar con 6 o 7.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    conductor.nombre = request.form.get('nombre', '').strip()
+    conductor.ci = ci
+    conductor.telf = telf
+    
+    # Opcional: Actualizar contraseña solo si se proporciona una nueva
+    nueva_password = request.form.get('password', '').strip()
+    if nueva_password:
+        conductor.passwordHash = generate_password_hash(nueva_password, method='pbkdf2:sha256')
+
+    db.session.commit()
+    flash('Conductor actualizado correctamente.', 'success')
+    return redirect(url_for('dashboard'))
+
+# ==========================================
+# GESTIÓN DE BUSES (SOLO ADMIN)
+# ==========================================
+@app.route('/bus/crear', methods=['POST'])
+@admin_required
+def crear_bus():
+    placa = request.form.get('placa', '').strip().upper()
+    modelo = request.form.get('modelo', '').strip()
+    capacidad = request.form.get('capacidad', '').strip()
+    estado = request.form.get('estado', 'Activo').strip()
+
+    if not validar_placa(placa):
+        flash('Formato de placa inválido. Ejemplo aceptado: 1234-ABC.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    nuevo_bus = Bus(placa=placa, modelo=modelo, capacidad=capacidad, estado=estado)
+    db.session.add(nuevo_bus)
+    db.session.commit()
+    
+    flash('Bus registrado correctamente.', 'success')
+    return redirect(url_for('dashboard'))
+
+@app.route('/bus/eliminar/<int:id>', methods=['POST'])
+@admin_required
+def eliminar_bus(id):
+    bus = Bus.query.get_or_404(id)
+    db.session.delete(bus)
+    db.session.commit()
+    flash('Bus eliminado del sistema.', 'success')
+    return redirect(url_for('dashboard'))
+
+# ==========================================
+# GESTIÓN DE VIAJES Y OPERATIVAS
+# ==========================================
+@app.route('/viaje/crear', methods=['POST'])
+@login_required
+def crear_viaje():
+    id_bus = request.form.get('idBus')
+    origen = request.form.get('origen', '').strip()
+    destino = request.form.get('destino', '').strip()
+    
+    bus = Bus.query.get(id_bus)
+    if not bus:
+        flash('El bus seleccionado no existe.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    # VALIDACIÓN DE ESTADO DEL VEHÍCULO EN SERVIDOR
+    if bus.estado in ['Mantenimiento', 'Inactivo']:
+        flash(f'No se puede asignar el viaje: El bus {bus.placa} está en estado {bus.estado}.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    nuevo_viaje = Viaje(idBus=id_bus, origen=origen, destino=destino, estado='Programado')
+    db.session.add(nuevo_viaje)
+    db.session.commit()
+    
+    flash('Viaje registrado correctamente.', 'success')
+    return redirect(url_for('dashboard'))
+
+# ==========================================
+# ANTECEDENTES Y CÁMARAS (SOLO ADMIN)
+# ==========================================
+@app.route('/antecedente/crear', methods=['POST'])
+@admin_required
+def crear_antecedente():
+    razon = request.form.get('razon', '').strip()
+    id_conductor = request.form.get('idConductor')
+    
+    if not razon or len(razon) < 5:
+        flash('La razón del antecedente debe ser más descriptiva.', 'danger')
+        return redirect(url_for('dashboard'))
+
+    nuevo_antecedente = Antecedente(idConductor=id_conductor, razon=razon)
+    db.session.add(nuevo_antecedente)
+    db.session.commit()
+    
+    flash('Antecedente registrado.', 'success')
+    return redirect(url_for('dashboard'))
+
+@app.route('/camaras', methods=['GET', 'POST'])
+@admin_required
+def gestionar_camaras():
+    if request.method == 'POST':
+        modelo = request.form.get('modeloCamara', '').strip()
+        # Lógica para guardar/configurar cámara...
+        flash('Configuración de cámara guardada.', 'success')
+    return render_template('camaras.html')
+
+if __name__ == '__main__':
+    app.run(debug=True)
+</app_py_dado>
+
+<app_py_actual>
+import os
+from dotenv import load_dotenv
+import mysql.connector
+import folium
+import math
+import time
+from mysql.connector import Error
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify
+import re
+from werkzeug.security import generate_password_hash, check_password_hash
+
+load_dotenv()  # Cargar variables de entorno desde .env
+
+app = Flask(__name__)
+app.secret_key = os.getenv('SECRET_KEY')
+
+DB_CONFIG = {
+    'host': os.getenv('DB_HOST'),
+    'user': os.getenv('DB_USER'),
+    'password': os.getenv('DB_PASSWORD'),
+    'database': os.getenv('DB_NAME')
+}
+
+def get_db_connection():
+    try:
+        return mysql.connector.connect(**DB_CONFIG)
+    except Error as e:
+        print(f"Error al conectar a MySQL: {e}")
+        return None
+
+def init_db():
+    conn = get_db_connection()
+    if conn and conn.is_connected():
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM Usuario WHERE username = %s", ('admin',))
+        user = cursor.fetchone()
+        
+        if not user:
+            # 1. Hashear las contraseñas iniciales
+            pass_admin_hash = generate_password_hash('admin123')
+            pass_chofer_hash = generate_password_hash('123456')
+
+            # Insertar Administrador
+            cursor.execute("INSERT INTO Usuario (username, passwordHash) VALUES (%s, %s)", ('admin', pass_admin_hash))
+            user_id = cursor.lastrowid
+            cursor.execute("""
+                INSERT INTO Administrador (idUsuario, primerNombreAdmin, apellidoPaternoAdmin, ci, telf)
+                VALUES (%s, 'Nathan', 'Torrico', '1234567', '70000000')
+            """, (user_id,))
+            
+            # Insertar Bus inicial
+            cursor.execute("INSERT INTO Bus (placa, marca, modelo, estado) VALUES (%s, %s, %s, %s)", ('2451-AZU', 'Scania', '2022', 'Activo'))
+            id_bus = cursor.lastrowid
+
+            # Insertar Cámara vinculada al Bus (Según tu tabla Camara)
+            cursor.execute("""
+                INSERT INTO Camara (idBus, estadoCamara, modeloCamara, ultimoMantenimiento)
+                VALUES (%s, 'Activa', 'Logitech C920 Cabina', CURDATE())
+            """, (id_bus,))
+            
+            # Insertar Chofer inicial
+            cursor.execute("INSERT INTO Usuario (username, passwordHash) VALUES (%s, %s)", ('chofer1', pass_chofer_hash))
+            c_user_id = cursor.lastrowid
+            cursor.execute("""
+                INSERT INTO Conductor (idUsuario, primerNombreConductor, segundoNombreConductor, apellidoPaterno, apellidoMaterno, ci, telf, categoriaLicenciaConducir)
+                VALUES (%s, 'Juan', 'Carlos', 'Pérez', 'Gómez', '5487921', '71234567', 'A')
+            """, (c_user_id,))
+            
+            conn.commit()
+            
+        cursor.close()
+        conn.close()
+
+@app.route('/')
+def index():
+    if 'usuario' in session:
+        return redirect(url_for('dashboard'))
+    return render_template('login.html')
+
+@app.route('/login', methods=['POST'])
+def login():
+    username = request.form['username']
+    password = request.form['password']
+    
+    conn = get_db_connection()
+    if not conn:
+        return render_template('login.html', error="Error de conexión con la base de datos")
+        
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT idUsuario, passwordHash FROM Usuario WHERE username = %s", (username,))
+    user = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    
+    if user and (check_password_hash(user['passwordHash'], password)):
+        session['usuario'] = username
+        session['id_usuario'] = user['idUsuario']
+        return redirect(url_for('dashboard'))
+    else:
+        return render_template('login.html', error="Usuario o contraseña incorrectos")
+
+@app.route('/dashboard')
+def dashboard():
+    if 'usuario' not in session:
+        return redirect(url_for('index'))
+        
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    
+    # 1. Obtener Datos del Perfil Usuario Actual y Determinar ROL
+    cursor.execute("""
+        SELECT u.idUsuario, u.username, 
+               a.idAdministrador, a.primerNombreAdmin, a.segundoNombreAdmin, a.apellidoPaternoAdmin, a.apellidoMaternoAdmin, a.ci as ciAdmin, a.telf as telfAdmin,
+               c.idConductor, c.primerNombreConductor, c.segundoNombreConductor, c.apellidoPaterno, c.apellidoMaterno, c.ci as ciConductor, c.telf as telfConductor
+        FROM Usuario u
+        LEFT JOIN Administrador a ON u.idUsuario = a.idUsuario
+        LEFT JOIN Conductor c ON u.idUsuario = c.idUsuario
+        WHERE u.idUsuario = %s
+    """, (session['id_usuario'],))
+    perfil = cursor.fetchone()
+
+    # Determinación del rol del usuario
+    rol = 'admin' if perfil and perfil.get('idAdministrador') else 'conductor'
+
+    # Normalizar campos para vista de perfil
+    if perfil:
+        perfil['primerNombre'] = perfil['primerNombreAdmin'] if rol == 'admin' else perfil['primerNombreConductor']
+        perfil['segundoNombre'] = perfil['segundoNombreAdmin'] if rol == 'admin' else perfil['segundoNombreConductor']
+        perfil['apellidoPaterno'] = perfil['apellidoPaternoAdmin'] if rol == 'admin' else perfil['apellidoPaterno']
+        perfil['apellidoMaterno'] = perfil['apellidoMaternoAdmin'] if rol == 'admin' else perfil['apellidoMaterno']
+        perfil['ci'] = perfil['ciAdmin'] if rol == 'admin' else perfil['ciConductor']
+        perfil['telf'] = perfil['telfAdmin'] if rol == 'admin' else perfil['telfConductor']
+
+    # 2. Obtener Lista de Conductores
+    cursor.execute("""
+        SELECT c.idConductor, c.idUsuario, c.primerNombreConductor, c.segundoNombreConductor, 
+               c.apellidoPaterno, c.apellidoMaterno, c.ci, c.telf, c.categoriaLicenciaConducir, u.username
+        FROM Conductor c
+        JOIN Usuario u ON c.idUsuario = u.idUsuario
+    """)
+    conductores = cursor.fetchall()
+    
+    # 3. Obtener Lista de Buses
+    cursor.execute("SELECT * FROM Bus")
+    buses = cursor.fetchall()
+
+    # 4. Obtener Lista de Antecedentes
+    cursor.execute("""
+        SELECT a.idAntecedente, CONCAT(c.primerNombreConductor, ' ', c.apellidoPaterno) as conductor,
+               a.razonAntecedente, a.fechaAntecedente
+        FROM Antecedente a
+        JOIN Conductor c ON a.idConductor = c.idConductor
+        ORDER BY a.fechaAntecedente DESC
+    """)
+    antecedentes = cursor.fetchall()
+
+    # 5. Obtener Viajes Registrados (Filtrado por Rol)
+    if rol == 'admin':
+        cursor.execute("""
+            SELECT v.idViaje, CONCAT(c.primerNombreConductor, ' ', c.apellidoPaterno) as conductor,
+                   b.placa, v.origen, v.destino, v.fechaSalida
+            FROM Viaje v
+            JOIN Conductor c ON v.idConductor = c.idConductor
+            JOIN Bus b ON v.idBus = b.idBus
+            ORDER BY v.idViaje DESC
+        """)
+    else:
+        cursor.execute("""
+            SELECT v.idViaje, CONCAT(c.primerNombreConductor, ' ', c.apellidoPaterno) as conductor,
+                   b.placa, v.origen, v.destino, v.fechaSalida
+            FROM Viaje v
+            JOIN Conductor c ON v.idConductor = c.idConductor
+            JOIN Bus b ON v.idBus = b.idBus
+            WHERE c.idUsuario = %s
+            ORDER BY v.idViaje DESC
+        """, (session['id_usuario'],))
+    viajes = cursor.fetchall()
+    
+    # 6. Obtener Historial de Fatiga (Filtrado por Rol)
+    if rol == 'admin':
+        cursor.execute("""
+            SELECT r.idRegistroDormida, CONCAT(c.primerNombreConductor, ' ', c.apellidoPaterno) as conductor,
+                   b.placa, r.fechaDormida, r.telemetriaEstado
+            FROM RegistroFatiga r
+            LEFT JOIN Conductor c ON r.idConductor = c.idConductor
+            LEFT JOIN Bus b ON r.idBus = b.idBus
+            ORDER BY r.fechaDormida DESC
+        """)
+    else:
+        cursor.execute("""
+            SELECT r.idRegistroDormida, CONCAT(c.primerNombreConductor, ' ', c.apellidoPaterno) as conductor,
+                   b.placa, r.fechaDormida, r.telemetriaEstado
+            FROM RegistroFatiga r
+            LEFT JOIN Conductor c ON r.idConductor = c.idConductor
+            LEFT JOIN Bus b ON r.idBus = b.idBus
+            WHERE c.idUsuario = %s
+            ORDER BY r.fechaDormida DESC
+        """, (session['id_usuario'],))
+    historial_fatiga = cursor.fetchall()
+    
+    # =========================================================
+    # 7. GENERACIÓN DEL MAPA FOLIUM (NUEVA SECCIÓN)
+    # =========================================================
+    # Mapa centrado en Cochabamba por defecto
+    mapa = folium.Map(location=[-17.3895, -66.1568], zoom_start=11)
+
+    # Identificar qué placas de bus tienen un evento de fatiga registrado
+    placas_con_fatiga = {registro['placa'] for registro in historial_fatiga if registro.get('placa')}
+
+    # Recorrer los viajes actuales para graficar los buses en el mapa
+    for viaje in viajes:
+        placa = viaje.get('placa')
+        conductor = viaje.get('conductor')
+        origen = viaje.get('origen')
+        destino = viaje.get('destino')
+
+        # Evaluar si el bus reporta fatiga
+        tiene_fatiga = placa in placas_con_fatiga
+
+        color_marcador = 'red' if tiene_fatiga else 'green'
+        icono_marcador = 'exclamation-triangle' if tiene_fatiga else 'bus'
+        estado_texto = "⚠️ FATIGA DETECTADA" if tiene_fatiga else "🟢 Estado Normal"
+
+        popup_contenido = f"""
+        <div style="font-family: Arial, sans-serif; min-width: 150px;">
+            <h6 style="margin:0; font-weight:bold;">Bus: {placa}</h6>
+            <hr style="margin: 5px 0;">
+            <b>Conductor:</b> {conductor}<br>
+            <b>Ruta:</b> {origen} ➔ {destino}<br>
+            <b>Estado:</b> <span style="color: {'red' if tiene_fatiga else 'green'}; font-weight: bold;">{estado_texto}</span>
+        </div>
+        """
+
+        # Coordenadas (Si las guardas en tu BD, usa viaje['lat'] y viaje['lng'])
+        lat, lon = -17.3895, -66.1568
+
+        folium.Marker(
+            location=[lat, lon],
+            popup=folium.Popup(popup_contenido, max_width=300),
+            icon=folium.Icon(color=color_marcador, icon=icono_marcador, prefix='fa')
+        ).add_to(mapa)
+
+    # Convertir mapa a objeto HTML que Jinja2 pueda renderizar
+    mapa_html = mapa._repr_html_()
+
+    cursor.close()
+    conn.close()
+    
+    return render_template('dashboard.html', 
+                           usuario=session['usuario'], 
+                           rol=rol,
+                           perfil=perfil,
+                           conductores=conductores, 
+                           buses=buses,
+                           antecedentes=antecedentes,
+                           viajes=viajes,
+                           historial=historial_fatiga,
+                           mapa_html=mapa_html) # <-- Pasamos mapa_html a la vista
+# --- MÓDULO ADMINISTRACIÓN: CRUD CONDUCTORES ---
+@app.route('/conductor/crear', methods=['POST'])
+def crear_conductor():
+
+    if 'usuario' not in session: return redirect(url_for('index'))
+
+    ci = request.form.get('ci', '').strip()
+    telf = request.form.get('telf', '').strip()
+
+    if not ci.isdigit():
+        return redirect(url_for('dashboard'))
+
+    if not re.fullmatch(r'[67]\d{7}', telf):
+        return redirect(url_for('dashboard'))
+
+    conn = get_db_connection()
+    if conn:
+        cursor = conn.cursor(dictionary=True)
+        try:
+            cursor.execute("INSERT INTO Usuario (username, passwordHash) VALUES (%s, %s)", 
+                           (request.form['username'], request.form['password']))
+            user_id = cursor.lastrowid
+            cursor.execute("""
+                INSERT INTO Conductor (idUsuario, primerNombreConductor, segundoNombreConductor, apellidoPaterno, apellidoMaterno, ci, telf, categoriaLicenciaConducir)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                user_id, 
+                request.form['primerNombreConductor'], 
+                request.form.get('segundoNombreConductor', ''),
+                request.form['apellidoPaterno'], 
+                request.form.get('apellidoMaterno', ''),
+                ci,
+                telf,
+                request.form['licencia']
+            ))
+            conn.commit()
+        except Error as e:
+            print(f"Error al crear conductor: {e}")
+        finally:
+            cursor.close()
+            conn.close()
+    return redirect(url_for('dashboard'))
+
+@app.route('/conductor/editar/<int:id_conductor>', methods=['POST'])
+def editar_conductor(id_conductor):
+    if 'usuario' not in session: return redirect(url_for('index'))
+    conn = get_db_connection()
+    if conn:
+        cursor = conn.cursor()
+        primer_nombre = request.form.get('primerNombreConductor', '')
+        segundo_nombre = request.form.get('segundoNombreConductor', '')
+        apellido_paterno = request.form.get('apellidoPaterno', '')
+        apellido_materno = request.form.get('apellidoMaterno', '')
+        ci = request.form.get('ci', '').strip()
+        telf = request.form.get('telf', '').strip()
+        licencia = request.form.get('licencia', '')
+
+        if not ci.isdigit():
+            return redirect(url_for('dashboard'))
+
+        if not re.fullmatch(r'[67]\d{7}', telf):
+            return redirect(url_for('dashboard'))
+        try:
+            cursor.execute("""
+            UPDATE Conductor 
+            SET primerNombreConductor = %s,
+                segundoNombreConductor = %s,
+                apellidoPaterno = %s,
+                apellidoMaterno = %s,
+                ci = %s,
+                telf = %s,
+                categoriaLicenciaConducir = %s
+            WHERE idConductor = %s
+            """, (primer_nombre, segundo_nombre, apellido_paterno, apellido_materno, ci, telf, licencia, id_conductor))
+            conn.commit()
+        except Error as e:
+            print(f"Error al editar conductor: {e}")
+        finally:
+            cursor.close()
+            conn.close()
+    return redirect(url_for('dashboard'))
+
+@app.route('/conductor/eliminar/<int:id_conductor>', methods=['POST'])
+def eliminar_conductor(id_conductor):
+    if 'usuario' not in session: return redirect(url_for('index'))
+    conn = get_db_connection()
+    if conn:
+        cursor = conn.cursor(dictionary=True)
+        try:
+            cursor.execute("SELECT idUsuario FROM Conductor WHERE idConductor = %s", (id_conductor,))
+            res = cursor.fetchone()
+            if res:
+                user_id = res['idUsuario']
+                cursor.execute("DELETE FROM Conductor WHERE idConductor = %s", (id_conductor,))
+                if user_id:
+                    cursor.execute("DELETE FROM Usuario WHERE idUsuario = %s", (user_id,))
+                conn.commit()
+        except Error as e:
+            print(f"Error al eliminar conductor: {e}")
+        finally:
+            cursor.close()
+            conn.close()
+    return redirect(url_for('dashboard'))
+
+# --- MÓDULO ADMINISTRACIÓN: CRUD BUSES ---
+
+@app.route('/bus/crear', methods=['POST'])
+def crear_bus():
+    if 'usuario' not in session: return redirect(url_for('index'))
+    conn = get_db_connection()
+    if conn:
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO Bus (placa, marca, modelo, estado) VALUES (%s, %s, %s, 'Activo')",
+                       (request.form['placa'], request.form['marca'], request.form['modelo']))
+        conn.commit()
+        cursor.close()
+        conn.close()
+    return redirect(url_for('dashboard'))
+
+@app.route('/bus/editar/<int:id_bus>', methods=['POST'])
+def editar_bus(id_bus):
+    if 'usuario' not in session: return redirect(url_for('index'))
+    conn = get_db_connection()
+    if conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE Bus SET placa=%s, marca=%s, modelo=%s, estado=%s WHERE idBus=%s
+        """, (request.form['placa'], request.form['marca'], request.form['modelo'], request.form['estado'], id_bus))
+        conn.commit()
+        cursor.close()
+        conn.close()
+    return redirect(url_for('dashboard'))
+
+@app.route('/bus/eliminar/<int:id_bus>', methods=['POST'])
+def eliminar_bus(id_bus):
+    if 'usuario' not in session: return redirect(url_for('index'))
+    conn = get_db_connection()
+    if conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM Bus WHERE idBus=%s", (id_bus,))
+        conn.commit()
+        cursor.close()
+        conn.close()
+    return redirect(url_for('dashboard'))
+
+# --- MÓDULO ADMINISTRACIÓN: ANTECEDENTES ---
+@app.route('/antecedente/crear', methods=['POST'])
+def crear_antecedente():
+    if 'usuario' not in session: return redirect(url_for('index'))
+    conn = get_db_connection()
+    if conn:
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO Antecedente (idConductor, razonAntecedente, fechaAntecedente) VALUES (%s, %s, NOW())",
+                       (request.form['idConductor'], request.form['razon']))
+        conn.commit()
+        cursor.close()
+        conn.close()
+    return redirect(url_for('dashboard'))
+
+# --- MÓDULO SEGUIMIENTO: VIAJES Y PERFIL ---
+
+@app.route('/viaje/crear', methods=['POST'])
+def crear_viaje():
+    if 'usuario' not in session: 
+        return redirect(url_for('index'))
+        
+    conn = get_db_connection()
+    if conn:
+        cursor = conn.cursor(dictionary=True)
+        
+        id_conductor = request.form.get('idConductor')
+        
+        # Si no viene en el formulario (por ser perfil de Conductor), se obtiene de la sesión actual
+        if not id_conductor:
+            cursor.execute("SELECT idConductor FROM Conductor WHERE idUsuario = %s", (session['id_usuario'],))
+            res = cursor.fetchone()
+            if res:
+                id_conductor = res['idConductor']
+
+        id_bus = request.form.get('idBus')
+        origen = request.form.get('origen')
+        destino = request.form.get('destino')
+
+        if id_conductor and id_bus:
+            cursor.execute("""
+                INSERT INTO Viaje (idConductor, idBus, origen, destino, fechaSalida)
+                VALUES (%s, %s, %s, %s, NOW())
+            """, (id_conductor, id_bus, origen, destino))
+            conn.commit()
+            
+        cursor.close()
+        conn.close()
+        
+    return redirect(url_for('dashboard'))
+
+@app.route('/perfil/editar', methods=['POST'])
+def editar_perfil():
+    if 'usuario' not in session: return redirect(url_for('index'))
+    conn = get_db_connection()
+    if conn:
+        cursor = conn.cursor(dictionary=True)
+        try:
+            cursor.execute("SELECT idAdministrador FROM Administrador WHERE idUsuario = %s", (session['id_usuario'],))
+            is_admin = cursor.fetchone()
+            
+            if is_admin:
+                cursor.execute("""
+                    UPDATE Administrador 
+                    SET primerNombreAdmin=%s, segundoNombreAdmin=%s, apellidoPaternoAdmin=%s, apellidoMaternoAdmin=%s, ci=%s, telf=%s
+                    WHERE idUsuario=%s
+                """, (
+                    request.form['primerNombre'],
+                    request.form.get('segundoNombre', ''),
+                    request.form['apellidoPaterno'],
+                    request.form.get('apellidoMaterno', ''),
+                    request.form['ci'],
+                    request.form['telf'],
+                    session['id_usuario']
+                ))
+            else:
+                cursor.execute("""
+                    UPDATE Conductor 
+                    SET primerNombreConductor=%s, segundoNombreConductor=%s, apellidoPaterno=%s, apellidoMaterno=%s, ci=%s, telf=%s
+                    WHERE idUsuario=%s
+                """, (
+                    request.form['primerNombre'],
+                    request.form.get('segundoNombre', ''),
+                    request.form['apellidoPaterno'],
+                    request.form.get('apellidoMaterno', ''),
+                    request.form['ci'],
+                    request.form['telf'],
+                    session['id_usuario']
+                ))
+            conn.commit()
+        except Error as e:
+            print(f"Error al editar perfil: {e}")
+        finally:
+            cursor.close()
+            conn.close()
+    return redirect(url_for('dashboard'))
+
+# --- API REST Y RECEPTOR DE TELEMETRÍA (MÓDULO HARDWARE & SIMULACIÓN) ---
+
+@app.route('/api/alerta_hardware', methods=['POST'])
+@app.route('/api/simular_fatiga', methods=['POST'])
+def recibir_alerta_hardware():
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"status": "error", "message": "Sin conexión a BD"}), 500
+        
+    cursor = conn.cursor(dictionary=True)
+    
+    data = request.get_json(silent=True) or {}
+    id_conductor = data.get('idConductor')
+    id_bus = data.get('idBus')
+
+    # Si no se provee idConductor en JSON, intentar vincular al usuario actual en sesión
+    if not id_conductor and 'id_usuario' in session:
+        cursor.execute("SELECT idConductor FROM Conductor WHERE idUsuario = %s", (session['id_usuario'],))
+        res_user = cursor.fetchone()
+        if res_user:
+            id_conductor = res_user['idConductor']
+
+    # Si sigue sin haber idConductor (ej. petición externa pura), tomar el primero como fallback
+    if not id_conductor:
+        cursor.execute("SELECT idConductor FROM Conductor LIMIT 1")
+        res_c = cursor.fetchone()
+        id_conductor = res_c['idConductor'] if res_c else None
+
+    # Si no hay idBus especificado, obtener el bus del último viaje registrado para ese conductor
+    if not id_bus and id_conductor:
+        cursor.execute("SELECT idBus FROM Viaje WHERE idConductor = %s ORDER BY idViaje DESC LIMIT 1", (id_conductor,))
+        res_b = cursor.fetchone()
+        id_bus = res_b['idBus'] if res_b else None
+
+    # Fallback si el conductor aún no tiene viajes registrados
+    if not id_bus:
+        cursor.execute("SELECT idBus FROM Bus LIMIT 1")
+        res_b_fallback = cursor.fetchone()
+        id_bus = res_b_fallback['idBus'] if res_b_fallback else None
+
+    if not id_conductor or not id_bus:
+        cursor.close()
+        conn.close()
+        return jsonify({"status": "error", "message": "Se requiere al menos un Conductor y Bus en MySQL"}), 400
+        
+    cursor.execute("""
+        INSERT INTO RegistroFatiga (idConductor, idBus, fechaDormida, telemetriaEstado)
+        VALUES (%s, %s, NOW(), TRUE)
+    """, (id_conductor, id_bus))
+    
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return jsonify({"status": "ok", "message": "Alerta recibida y almacenada en MySQL"})
+# Variable de control en .env para alternar entre simulación y hardware real
+MODO_DEMO = os.getenv('MODO_DEMO', 'True') == 'True'
+
+# Coordenadas de los 9 Departamentos de Bolivia
+DEPARTAMENTOS = {
+    'cochabamba': [-17.3895, -66.1568],
+    'la paz': [-16.5001, -68.1193],
+    'santa cruz': [-17.7833, -63.1821],
+    'oruro': [-17.9647, -67.1060],
+    'potosi': [-19.5836, -65.7531],
+    'potosí': [-19.5836, -65.7531],
+    'chuquisaca': [-19.0333, -65.2627],
+    'sucre': [-19.0333, -65.2627],
+    'tarija': [-21.5355, -64.7295],
+    'beni': [-14.8333, -64.9000],
+    'trinidad': [-14.8333, -64.9000],
+    'pando': [-11.0267, -68.7692],
+    'cobija': [-11.0267, -68.7692]
+}
+
+def obtener_coordenadas(nombre_ciudad, default):
+    if not nombre_ciudad:
+        return default
+    nombre_clean = nombre_ciudad.strip().lower()
+    for ciudad, coords in DEPARTAMENTOS.items():
+        if ciudad in nombre_clean:
+            return coords
+    return default
+
+@app.route('/api/posiciones_buses')
+def obtener_posiciones_buses():
+    conn = get_db_connection()
+    if not conn:
+        return jsonify([])
+        
+    cursor = conn.cursor(dictionary=True)
+    
+    # Obtener todos los viajes registrados con su bus, conductor y alertas asociadas
+    cursor.execute("""
+        SELECT v.idViaje, v.origen, v.destino, b.idBus, b.placa, 
+               CONCAT(c.primerNombreConductor, ' ', c.apellidoPaterno) as conductor,
+               cam.modeloCamara
+        FROM Viaje v
+        JOIN Bus b ON v.idBus = b.idBus
+        JOIN Conductor c ON v.idConductor = c.idConductor
+        LEFT JOIN Camara cam ON b.idBus = cam.idBus
+    """)
+    viajes = cursor.fetchall()
+
+    posiciones = []
+
+    for idx, viaje in enumerate(viajes):
+        # Obtener coordenadas de origen y destino según lo registrado por el conductor
+        origen_coords = obtener_coordenadas(viaje['origen'], [-17.3895, -66.1568])
+        destino_coords = obtener_coordenadas(viaje['destino'], [-17.9647, -67.1060])
+
+        # Verificar si este bus tiene alguna alerta de fatiga activa
+        cursor.execute("""
+            SELECT idRegistroDormida, latitud, longitud 
+            FROM RegistroFatiga 
+            WHERE idBus = %s 
+            ORDER BY fechaDormida DESC LIMIT 1
+        """, (viaje['idBus'],))
+        fatiga = cursor.fetchone()
+
+        if fatiga:
+            # SI HAY FATIGA: Se detiene en la posición reportada o a mitad de tramo
+            lat_actual = fatiga['latitud'] or (origen_coords[0] + (destino_coords[0] - origen_coords[0]) * 0.5)
+            lon_actual = fatiga['longitud'] or (origen_coords[1] + (destino_coords[1] - origen_coords[1]) * 0.5)
+            estado_fatiga = True
+        else:
+            # MODO DEMO: Desplazamiento dinámico sobre la carretera entre Origen y Destino
+            estado_fatiga = False
+            if MODO_DEMO:
+                # Transcurso cíclico desfasado por bus (60 segundos por trayecto)
+                t = ((time.time() + idx * 15) % 60) / 60.0  
+                lat_actual = origen_coords[0] + (destino_coords[0] - origen_coords[0]) * t
+                lon_actual = origen_coords[1] + (destino_coords[1] - origen_coords[1]) * t
+            else:
+                lat_actual, lon_actual = origen_coords[0], origen_coords[1]
+
+        posiciones.append({
+            "idViaje": viaje['idViaje'],
+            "idBus": viaje['idBus'],
+            "placa": viaje['placa'],
+            "conductor": viaje['conductor'],
+            "camara": viaje['modeloCamara'] or "WebCam Cabina",
+            "lat": lat_actual,
+            "lon": lon_actual,
+            "fatiga": estado_fatiga
+        })
+
+    cursor.close()
+    conn.close()
+    return jsonify(posiciones)
+
+# GESTIÓN CÁMARAS
+@app.route('/camaras', methods=['GET', 'POST'])
+def crear_camara():
+    if 'usuario' not in session:
+        return redirect(url_for('index'))
+        
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    if request.method == 'POST':
+        id_bus = request.form['idBus']
+        modelo = request.form['modeloCamara']
+        estado = request.form['estadoCamara']
+        mantenimiento = request.form['ultimoMantenimiento']
+
+        cursor.execute("""
+            INSERT INTO Camara (idBus, modeloCamara, estadoCamara, ultimoMantenimiento)
+            VALUES (%s, %s, %s, %s)
+        """, (id_bus, modelo, estado, mantenimiento))
+        conn.commit()
+
+    cursor.execute("""
+        SELECT c.*, b.placa, b.marca 
+        FROM Camara c
+        LEFT JOIN Bus b ON c.idBus = b.idBus
+    """)
+    camaras = cursor.fetchall()
+
+    cursor.execute("SELECT idBus, placa, marca FROM Bus")
+    buses = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+    
+    # Redirige al dashboard si la gestión está integrada ahí
+    return redirect(url_for('dashboard'))
+
+@app.route('/camaras/editar/<int:id_camara>', methods=['POST'])
+def editar_camara(id_camara):
+    if 'usuario' not in session:
+        return redirect(url_for('index'))
+
+    id_bus = request.form['idBus']
+    modelo = request.form['modeloCamara']
+    estado = request.form['estadoCamara']
+    mantenimiento = request.form['ultimoMantenimiento']
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE Camara 
+        SET idBus = %s, modeloCamara = %s, estadoCamara = %s, ultimoMantenimiento = %s
+        WHERE idCamara = %s
+    """, (id_bus, modelo, estado, mantenimiento, id_camara))
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return redirect(url_for('dashboard'))
+
+@app.route('/camaras/eliminar/<int:id_camara>', methods=['POST'])
+def eliminar_camara(id_camara):
+    if 'usuario' not in session:
+        return redirect(url_for('index'))
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM Camara WHERE idCamara = %s", (id_camara,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return redirect(url_for('dashboard'))
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('index'))
+
+if __name__ == '__main__':
+    init_db()
+    app.run(debug=True, port=5000)
+</app_py_actual>
